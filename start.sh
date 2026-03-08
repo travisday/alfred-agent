@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-# Sync workspace from git repo
-# The repo has workspace files inside alfred/ subdirectory, so we clone
-# to a hidden staging dir and copy just that subdirectory into /alfred.
+# Sync Pi agent config from git repo (extensions, prompts, .pi/ settings)
+# Markdown workspace files (AGENTS.md, projects/, etc.) live on the volume
+# and are NOT overwritten — they're managed by the agent at runtime.
 if [ -n "$GITHUB_REPO" ]; then
   git config --global user.email "alfred@railway.app"
   git config --global user.name "Alfred"
@@ -18,10 +18,10 @@ if [ -n "$GITHUB_REPO" ]; then
     cd "$REPO_DIR" && git pull --rebase --autostash || echo "Git pull failed — skipping (resolve manually)"
   fi
 
-  # Copy workspace files from repo's alfred/ subdirectory into /alfred
-  if [ -d "$REPO_DIR/alfred" ]; then
-    echo "Syncing workspace files from repo..."
-    cp -a "$REPO_DIR/alfred/." /alfred/
+  # Only sync Pi agent config (.pi/) — never overwrite workspace markdown files
+  if [ -d "$REPO_DIR/alfred/.pi" ]; then
+    echo "Syncing .pi/ config from repo..."
+    cp -a "$REPO_DIR/alfred/.pi/." /alfred/.pi/
   fi
 fi
 
