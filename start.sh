@@ -1,65 +1,74 @@
 #!/bin/bash
 set -e
 
-# Sync Pi agent config from git repo (extensions, prompts, .pi/ settings)
-# Markdown workspace files (AGENTS.md, projects/, etc.) live on the volume
-# and are NOT overwritten — they're managed by the agent at runtime.
-if [ -n "$GITHUB_REPO" ]; then
-  git config --global user.email "alfred@railway.app"
-  git config --global user.name "Alfred"
-
-  REPO_DIR="/alfred/.repo"
-
-  if [ ! -d "$REPO_DIR/.git" ]; then
-    echo "First boot: cloning repo..."
-    git clone "https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git" "$REPO_DIR"
-  else
-    echo "Pulling latest from git..."
-    cd "$REPO_DIR" && git pull --rebase --autostash || echo "Git pull failed — skipping (resolve manually)"
-  fi
-
-  # Only sync Pi agent config (.pi/) — never overwrite workspace markdown files
-  if [ -d "$REPO_DIR/.pi" ]; then
-    echo "Syncing .pi/ config from repo..."
-    cp -a "$REPO_DIR/.pi/." /alfred/.pi/
-  fi
+# --- Validate required env ---
+if [ -z "$TS_AUTHKEY" ]; then
+  echo "ERROR: TS_AUTHKEY is not set. Cannot join Tailscale network."
+  exit 1
 fi
 
-# Store Tailscale state inside the /alfred volume (single volume setup)
+# --- Sync .pi/ config from Docker image into the volume ---
+if [ -d /opt/alfred-pi-config ]; then
+  mkdir -p /alfred/.pi
+  cp -a /opt/alfred-pi-config/. /alfred/.pi/
+  echo "Synced .pi/ config into workspace"
+fi
+
+# --- Tailscale ---
 mkdir -p /alfred/.tailscale
-
-# Start Tailscale daemon in userspace networking mode
-# (Railway containers don't have /dev/net/tun)
 tailscaled --state=/alfred/.tailscale/tailscaled.state --tun=userspace-networking &
-sleep 2
 
-# Authenticate and join tailnet
-tailscale up --authkey=${TS_AUTHKEY} --hostname=alfred --ssh
+# Wait for tailscaled to be ready (up to 10s)
+for i in $(seq 1 20); do
+  tailscale status >/dev/null 2>&1 && break
+  sleep 0.5
+done
 
-# Expose Railway env vars to SSH sessions and land in /alfred
-# (Railway injects env vars into PID 1 only — SSH sessions don't inherit them)
+tailscale up --authkey="${TS_AUTHKEY}" --hostname=alfred --ssh
+
+# --- Configure Pi agent auth.json ---
+# Pi resolution order: CLI flag → auth.json → env var → models.json
+# Dynamically builds auth.json from whichever LLM API keys are present.
+mkdir -p /root/.pi/agent
+
+AUTH_JSON="{"
+FIRST=true
+
+add_provider() {
+  local name="$1" key="$2"
+  if [ -n "$key" ]; then
+    $FIRST || AUTH_JSON="${AUTH_JSON},"
+    AUTH_JSON="${AUTH_JSON}\"${name}\":{\"type\":\"api_key\",\"key\":\"${key}\"}"
+    FIRST=false
+  fi
+}
+
+add_provider "groq"      "$GROQ_API_KEY"
+add_provider "anthropic"  "$ANTHROPIC_API_KEY"
+add_provider "openai"     "$OPENAI_API_KEY"
+add_provider "google"     "$GEMINI_API_KEY"
+
+AUTH_JSON="${AUTH_JSON}}"
+
+if [ "$FIRST" = false ]; then
+  echo "$AUTH_JSON" > /root/.pi/agent/auth.json
+  chmod 600 /root/.pi/agent/auth.json
+  echo "Configured LLM providers in auth.json"
+else
+  echo "WARNING: No LLM API keys found. Set at least one of: GROQ_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY"
+fi
+
+# --- Expose env vars to SSH sessions ---
+# Railway injects env vars into PID 1 only — SSH sessions don't inherit them.
+# Pass through everything except infra secrets and common noise.
 {
-  env | grep -E '^(GROQ_|ANTHROPIC_|OPENAI_|GEMINI_|GITHUB_TOKEN|GITHUB_REPO)' | sed 's/^/export /'
+  env | grep -vE '^(TS_AUTHKEY|SSH_PASSWORD|HOSTNAME|HOME|PATH|PWD|SHLVL|_)=' | sed 's/^/export /'
   echo 'cd /alfred 2>/dev/null'
 } > /etc/profile.d/railway-env.sh 2>/dev/null || true
 chmod 644 /etc/profile.d/railway-env.sh
 
-# Configure Pi agent auth.json (recreated on every boot since /root is ephemeral)
-# Pi resolution order: CLI flag → auth.json → env var → models.json
-mkdir -p /root/.pi/agent
-if [ -n "$GROQ_API_KEY" ]; then
-  cat > /root/.pi/agent/auth.json << EOF
-{
-  "groq": { "type": "api_key", "key": "$GROQ_API_KEY" }
-}
-EOF
-  chmod 600 /root/.pi/agent/auth.json
-fi
-
-# Set SSH password from env (fallback for non-Tailscale connections)
+# --- SSH ---
 echo "root:${SSH_PASSWORD:-changeme}" | chpasswd
-
-# Start SSH server (needed for mosh connections)
 /usr/sbin/sshd
 
 echo "==============================="
