@@ -1,9 +1,22 @@
 #!/bin/bash
 set -e
 
+# One-time cleanup: remove cruft left by the old (broken) clone logic
+# that dumped the entire repo into /alfred/ instead of just the workspace files.
+if [ -f /alfred/Dockerfile ] || [ -d /alfred/alfred ]; then
+  echo "Cleaning up old clone artifacts..."
+  rm -f /alfred/Dockerfile /alfred/start.sh /alfred/prd.md
+  rm -rf /alfred/.git
+  # If there's a nested alfred/alfred/ dir, its contents are duplicates
+  # of what's already at /alfred/ — safe to remove the nested copy
+  rm -rf /alfred/alfred
+  rm -rf /alfred/lost+found
+  echo "Cleanup done."
+fi
+
 # Sync workspace from git repo
 # The repo has workspace files inside alfred/ subdirectory, so we clone
-# to a staging dir and copy just that subdirectory into the /alfred volume.
+# to a hidden staging dir and copy just that subdirectory into /alfred.
 if [ -n "$GITHUB_REPO" ]; then
   git config --global user.email "alfred@railway.app"
   git config --global user.name "Alfred"
@@ -53,6 +66,9 @@ if [ -n "$GROQ_API_KEY" ]; then
 EOF
   chmod 600 /root/.pi/agent/auth.json
 fi
+
+# Set default SSH landing directory to /alfred (instead of /root)
+usermod -d /alfred root 2>/dev/null || true
 
 # Set SSH password from env (fallback for non-Tailscale connections)
 echo "root:${SSH_PASSWORD:-changeme}" | chpasswd
