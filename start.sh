@@ -19,9 +19,9 @@ if [ -n "$GITHUB_REPO" ]; then
   fi
 
   # Only sync Pi agent config (.pi/) — never overwrite workspace markdown files
-  if [ -d "$REPO_DIR/alfred/.pi" ]; then
+  if [ -d "$REPO_DIR/.pi" ]; then
     echo "Syncing .pi/ config from repo..."
-    cp -a "$REPO_DIR/alfred/.pi/." /alfred/.pi/
+    cp -a "$REPO_DIR/.pi/." /alfred/.pi/
   fi
 fi
 

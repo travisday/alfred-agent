@@ -1,10 +1,6 @@
 node_modules/
 .env
 
-# Runtime state (stored in volume, not in git)
-alfred/.tailscale/
-alfred/.repo/
-
 # OS generated files
 .DS_Store
 .DS_Store?
