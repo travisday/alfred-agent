@@ -30,6 +30,24 @@ sleep 2
 # Authenticate and join tailnet
 tailscale up --authkey=${TS_AUTHKEY} --hostname=alfred --ssh
 
+# Expose Railway env vars to SSH sessions
+# (Railway injects env vars into PID 1 only — SSH sessions don't inherit them)
+env | grep -E '^(GROQ_|ANTHROPIC_|OPENAI_|GEMINI_|GITHUB_TOKEN|GITHUB_REPO)' | \
+  sed 's/^/export /' > /etc/profile.d/railway-env.sh 2>/dev/null || true
+chmod 644 /etc/profile.d/railway-env.sh
+
+# Configure Pi agent auth.json (recreated on every boot since /root is ephemeral)
+# Pi resolution order: CLI flag → auth.json → env var → models.json
+mkdir -p /root/.pi/agent
+if [ -n "$GROQ_API_KEY" ]; then
+  cat > /root/.pi/agent/auth.json << EOF
+{
+  "groq": { "type": "api_key", "key": "$GROQ_API_KEY" }
+}
+EOF
+  chmod 600 /root/.pi/agent/auth.json
+fi
+
 # Set SSH password from env (fallback for non-Tailscale connections)
 echo "root:${SSH_PASSWORD:-changeme}" | chpasswd
 
