@@ -1,19 +1,6 @@
 #!/bin/bash
 set -e
 
-# One-time cleanup: remove cruft left by the old (broken) clone logic
-# that dumped the entire repo into /alfred/ instead of just the workspace files.
-if [ -f /alfred/Dockerfile ] || [ -d /alfred/alfred ]; then
-  echo "Cleaning up old clone artifacts..."
-  rm -f /alfred/Dockerfile /alfred/start.sh /alfred/prd.md
-  rm -rf /alfred/.git
-  # If there's a nested alfred/alfred/ dir, its contents are duplicates
-  # of what's already at /alfred/ — safe to remove the nested copy
-  rm -rf /alfred/alfred
-  rm -rf /alfred/lost+found
-  echo "Cleanup done."
-fi
-
 # Sync workspace from git repo
 # The repo has workspace files inside alfred/ subdirectory, so we clone
 # to a hidden staging dir and copy just that subdirectory into /alfred.
@@ -49,10 +36,12 @@ sleep 2
 # Authenticate and join tailnet
 tailscale up --authkey=${TS_AUTHKEY} --hostname=alfred --ssh
 
-# Expose Railway env vars to SSH sessions
+# Expose Railway env vars to SSH sessions and land in /alfred
 # (Railway injects env vars into PID 1 only — SSH sessions don't inherit them)
-env | grep -E '^(GROQ_|ANTHROPIC_|OPENAI_|GEMINI_|GITHUB_TOKEN|GITHUB_REPO)' | \
-  sed 's/^/export /' > /etc/profile.d/railway-env.sh 2>/dev/null || true
+{
+  env | grep -E '^(GROQ_|ANTHROPIC_|OPENAI_|GEMINI_|GITHUB_TOKEN|GITHUB_REPO)' | sed 's/^/export /'
+  echo 'cd /alfred 2>/dev/null'
+} > /etc/profile.d/railway-env.sh 2>/dev/null || true
 chmod 644 /etc/profile.d/railway-env.sh
 
 # Configure Pi agent auth.json (recreated on every boot since /root is ephemeral)
@@ -66,9 +55,6 @@ if [ -n "$GROQ_API_KEY" ]; then
 EOF
   chmod 600 /root/.pi/agent/auth.json
 fi
-
-# Set default SSH landing directory to /alfred (instead of /root)
-usermod -d /alfred root 2>/dev/null || true
 
 # Set SSH password from env (fallback for non-Tailscale connections)
 echo "root:${SSH_PASSWORD:-changeme}" | chpasswd
