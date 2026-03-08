@@ -1,21 +1,27 @@
 #!/bin/bash
 set -e
 
-# Sync repo to volume via git
+# Sync workspace from git repo
+# The repo has workspace files inside alfred/ subdirectory, so we clone
+# to a staging dir and copy just that subdirectory into the /alfred volume.
 if [ -n "$GITHUB_REPO" ]; then
   git config --global user.email "alfred@railway.app"
   git config --global user.name "Alfred"
-  if [ ! -d /alfred/.git ]; then
-    echo "First boot: cloning repo into /alfred..."
-    git clone "https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git" /tmp/repo
-    shopt -s dotglob
-    mv /tmp/repo/* /alfred/ 2>/dev/null || true
-    mv /tmp/repo/.git /alfred/.git
-    shopt -u dotglob
-    rm -rf /tmp/repo
+
+  REPO_DIR="/alfred/.repo"
+
+  if [ ! -d "$REPO_DIR/.git" ]; then
+    echo "First boot: cloning repo..."
+    git clone "https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git" "$REPO_DIR"
   else
     echo "Pulling latest from git..."
-    cd /alfred && git pull --rebase --autostash || echo "Git pull failed — skipping (resolve manually)"
+    cd "$REPO_DIR" && git pull --rebase --autostash || echo "Git pull failed — skipping (resolve manually)"
+  fi
+
+  # Copy workspace files from repo's alfred/ subdirectory into /alfred
+  if [ -d "$REPO_DIR/alfred" ]; then
+    echo "Syncing workspace files from repo..."
+    cp -a "$REPO_DIR/alfred/." /alfred/
   fi
 fi
 

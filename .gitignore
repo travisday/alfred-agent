@@ -1,8 +1,9 @@
 node_modules/
 .env
 
-# Tailscale state (stored in volume at runtime)
+# Runtime state (stored in volume, not in git)
 alfred/.tailscale/
+alfred/.repo/
 
 # OS generated files
 .DS_Store
