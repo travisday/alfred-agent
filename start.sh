@@ -4,8 +4,9 @@ set -e
 # Store Tailscale state inside the /alfred volume (single volume setup)
 mkdir -p /alfred/.tailscale
 
-# Start Tailscale daemon
-tailscaled --state=/alfred/.tailscale/tailscaled.state &
+# Start Tailscale daemon in userspace networking mode
+# (Railway containers don't have /dev/net/tun)
+tailscaled --state=/alfred/.tailscale/tailscaled.state --tun=userspace-networking &
 sleep 2
 
 # Authenticate and join tailnet
