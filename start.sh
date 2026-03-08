@@ -1,8 +1,11 @@
 #!/bin/bash
 set -e
 
+# Store Tailscale state inside the /alfred volume (single volume setup)
+mkdir -p /alfred/.tailscale
+
 # Start Tailscale daemon
-tailscaled --state=/var/lib/tailscale/tailscaled.state &
+tailscaled --state=/alfred/.tailscale/tailscaled.state &
 sleep 2
 
 # Authenticate and join tailnet
