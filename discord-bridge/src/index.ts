@@ -16,6 +16,7 @@ import {
   DMChannel,
   Events,
   GatewayIntentBits,
+  Partials,
   type Message,
 } from "discord.js";
 
@@ -76,7 +77,8 @@ async function handleDM(message: Message): Promise<void> {
     return;
   }
 
-  const channel = message.channel as DMChannel;
+  // Fetch channel if partial (needed for DMs when channel wasn't cached)
+  const channel = (await message.channel.fetch()) as DMChannel;
   const content = message.content?.trim();
 
   if (!content) {
@@ -170,6 +172,7 @@ async function main(): Promise<void> {
       GatewayIntentBits.MessageContent,
       GatewayIntentBits.Guilds,
     ],
+    partials: [Partials.Channel, Partials.Message],
   });
 
   client.on(Events.ClientReady, (c) => {
