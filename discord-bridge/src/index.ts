@@ -31,6 +31,7 @@ const PROMPT_TIMEOUT_MS = parseInt(process.env.DISCORD_PROMPT_TIMEOUT_MS ?? "", 
 
 let session: AgentSession | null = null;
 let processing = false;
+const messageQueue: { message: Message; content: string }[] = [];
 
 function formatErrorForUser(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
@@ -129,14 +130,16 @@ async function handleDM(message: Message): Promise<void> {
   console.log("[Discord bridge] Processing DM:", content.slice(0, 50) + (content.length > 50 ? "..." : ""));
 
   if (processing) {
-    console.log("[Discord bridge] Busy, rejecting concurrent message");
+    console.log("[Discord bridge] Busy, queueing message (queue length:", messageQueue.length + 1, ")");
+    messageQueue.push({ message, content });
     try {
       await channel.send({
-        content: "Still working on that—give me a moment.",
+        content: "Got it—I'll get to that as soon as I finish this.",
         reply: { messageReference: message },
       });
-    } catch {
-      // Ignore
+      console.log("[Discord bridge] Queued, confirmation sent");
+    } catch (sendErr) {
+      console.error("[Discord bridge] Failed to send queue confirmation:", sendErr);
     }
     return;
   }
@@ -212,6 +215,8 @@ async function handleDM(message: Message): Promise<void> {
     if (buffer.trim()) {
       const replyTo = firstChunkSent ? undefined : message;
       await sendToDiscord(channel, buffer, replyTo);
+    } else {
+      console.log("[Discord bridge] Empty buffer after prompt - agent may have produced no text");
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -228,6 +233,12 @@ async function handleDM(message: Message): Promise<void> {
     }
   } finally {
     processing = false;
+    // Process next queued message
+    const next = messageQueue.shift();
+    if (next) {
+      console.log("[Discord bridge] Processing queued message");
+      setImmediate(() => handleDM(next.message));
+    }
   }
 }
 
