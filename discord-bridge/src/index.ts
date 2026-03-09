@@ -161,8 +161,23 @@ async function handleDM(message: Message): Promise<void> {
     await channel.sendTyping();
 
     let buffer = "";
+    let lastAssistantText = ""; // Fallback from message_end/turn_end when streaming misses
     let firstChunkSent = false;
     const pendingSends: Promise<unknown>[] = [];
+
+    function extractTextFromMessage(msg: { content?: unknown }): string {
+      if (!msg?.content) return "";
+      const c = msg.content;
+      if (typeof c === "string") return c;
+      if (Array.isArray(c)) {
+        return c
+          .filter((b): b is { type: string; text?: string } => typeof b === "object" && b != null)
+          .filter((b) => b.type === "text" && typeof b.text === "string")
+          .map((b) => b.text!)
+          .join("");
+      }
+      return "";
+    }
 
     const unsub = s.subscribe((event) => {
       if (event.type === "message_update" && event.assistantMessageEvent) {
@@ -180,6 +195,24 @@ async function handleDM(message: Message): Promise<void> {
               pendingSends.push(channel.send({ content: chunk, ...opts }));
             }
           }
+        } else if (ev.type === "text_end" && typeof (ev as { content?: string }).content === "string") {
+          buffer += (ev as { content: string }).content;
+        }
+      } else if (event.type === "message_end" && (event as { message?: unknown }).message) {
+        const m = (event as { message: { role?: string; content?: unknown } }).message;
+        if (m.role === "assistant") {
+          lastAssistantText = extractTextFromMessage(m);
+        }
+      } else if (event.type === "turn_end" && (event as { message?: unknown }).message) {
+        const m = (event as { message: { role?: string; content?: unknown } }).message;
+        if (m.role === "assistant") {
+          lastAssistantText = extractTextFromMessage(m);
+        }
+      } else if (event.type === "agent_end" && (event as { messages?: unknown[] }).messages) {
+        const msgs = (event as { messages: { role?: string; content?: unknown }[] }).messages;
+        const last = [...msgs].reverse().find((m) => m.role === "assistant");
+        if (last) {
+          lastAssistantText = extractTextFromMessage(last);
         }
       }
     });
@@ -212,11 +245,23 @@ async function handleDM(message: Message): Promise<void> {
     await Promise.all(pendingSends);
     console.log("[Discord bridge] Prompt complete");
 
-    if (buffer.trim()) {
+    const textToSend = buffer.trim() || lastAssistantText.trim();
+    if (textToSend) {
+      if (!buffer.trim() && lastAssistantText.trim()) {
+        console.log("[Discord bridge] Used fallback capture (message_end/turn_end/agent_end)");
+      }
       const replyTo = firstChunkSent ? undefined : message;
-      await sendToDiscord(channel, buffer, replyTo);
+      await sendToDiscord(channel, textToSend, replyTo);
     } else {
-      console.log("[Discord bridge] Empty buffer after prompt - agent may have produced no text");
+      console.log("[Discord bridge] No text captured from agent (buffer empty, no message_end/turn_end)");
+      try {
+        await channel.send({
+          content: "I didn't get a response from Alfred. Try again or ask something else.",
+          reply: { messageReference: message },
+        });
+      } catch {
+        // Ignore
+      }
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
