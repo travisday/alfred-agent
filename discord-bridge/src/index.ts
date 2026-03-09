@@ -184,6 +184,7 @@ async function handleDM(message: Message): Promise<void> {
         content: "Still working on that—give me a moment.",
         reply: { messageReference: message },
       });
+      processing = false;
       return;
     }
 
@@ -291,10 +292,11 @@ async function handleDM(message: Message): Promise<void> {
     await Promise.all(pendingSends);
     console.log("[Discord bridge] Prompt complete");
 
-    const textToSend = buffer.trim() || lastAssistantText.trim();
+    // Prefer lastAssistantText (complete final message) over buffer (streamed, may be incomplete)
+    const textToSend = lastAssistantText.trim() || buffer.trim();
     if (textToSend) {
-      if (!buffer.trim() && lastAssistantText.trim()) {
-        console.log("[Discord bridge] Used fallback capture (message_end/turn_end/agent_end)");
+      if (lastAssistantText.trim()) {
+        console.log("[Discord bridge] Using complete message from message_end/turn_end/agent_end");
       }
       const replyTo = firstChunkSent ? undefined : message;
       await sendToDiscord(channel, textToSend, replyTo);
