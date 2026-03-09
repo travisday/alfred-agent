@@ -1,6 +1,9 @@
 node_modules/
 .env
 
+# CalDAV extension deps (installed at Docker build)
+.pi/extensions/caldav/node_modules/
+
 # OS generated files
 .DS_Store
 .DS_Store?

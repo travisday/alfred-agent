@@ -20,6 +20,9 @@ WORKDIR /alfred
 # Stage Pi agent config for runtime copy (volume mount at /alfred hides build-time files)
 COPY .pi/ /opt/alfred-pi-config/
 
+# Install CalDAV extension dependencies
+RUN cd /opt/alfred-pi-config/extensions/caldav && npm install
+
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 

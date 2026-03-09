@@ -1,0 +1,10 @@
+{
+  "name": "alfred-caldav-extension",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "tsdav": "^2.1.8",
+    "ical.js": "^2.2.1"
+  }
+}

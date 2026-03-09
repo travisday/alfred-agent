@@ -50,7 +50,25 @@ Used to connect the Railway container to your private Tailscale network so you c
    - **Expiration**: Set to your preference (you'll need to regenerate when it expires)
 5. Copy the key — this becomes your `TS_AUTHKEY` env var
 
-### 2. LLM Provider API Key
+### 2. CalDAV (optional — Apple Calendar)
+
+To enable Alfred to read your Apple Calendar, set:
+
+| Variable | Description |
+|----------|-------------|
+| `CALDAV_USERNAME` | Your Apple ID (e.g. `you@icloud.com`) |
+| `CALDAV_APP_PASSWORD` | [App-specific password](https://support.apple.com/en-us/HT204397) (required for iCloud) |
+
+Optional:
+
+| Variable | Description |
+|----------|-------------|
+| `CALDAV_SERVER_URL` | Default: `https://caldav.icloud.com` |
+| `CALDAV_TIMEZONE` | Default: `America/Los_Angeles` |
+
+When configured, Alfred can use `get_today_events`, `get_calendar_events`, and `get_upcoming` to read your schedule.
+
+### 3. LLM Provider API Key
 
 Alfred uses the [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) under the hood, which supports multiple LLM providers. You need an API key for at least one.
 
@@ -74,6 +92,8 @@ Set these in your Railway service settings:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `TS_AUTHKEY` | **Yes** | Tailscale auth key for private network access |
+| `CALDAV_USERNAME` | Optional | Apple ID for iCloud CalDAV |
+| `CALDAV_APP_PASSWORD` | Optional | App-specific password for iCloud |
 | `GROQ_API_KEY` | At least one | Groq API key |
 | `ANTHROPIC_API_KEY` | At least one | Anthropic API key |
 | `OPENAI_API_KEY` | At least one | OpenAI API key |
@@ -176,10 +196,14 @@ If you want to customize it, edit `.pi/SYSTEM.md` in this repo and redeploy:
 
 ```
 .pi/
-└── SYSTEM.md    ← Alfred's system prompt (replaces Pi's default)
+├── SYSTEM.md              ← Alfred's system prompt (replaces Pi's default)
+└── extensions/
+    └── caldav/            ← CalDAV extension (Apple Calendar)
+        ├── index.ts
+        └── package.json
 ```
 
-> **How it works:** Pi looks for `.pi/SYSTEM.md` in the working directory and uses it as the system prompt instead of its built-in default. The Dockerfile stages `.pi/` into the image, and `start.sh` copies it into `/alfred/.pi/` on every boot — so it's always available in the volume where you land via SSH. Any changes you push to the repo get picked up on the next Railway deploy.
+> **How it works:** Pi looks for `.pi/SYSTEM.md` in the working directory and uses it as the system prompt instead of its built-in default. The Dockerfile stages `.pi/` into the image, and `start.sh` copies it into `/alfred/.pi/` on every boot — so it's always available in the volume where you land via SSH. The CalDAV extension is auto-discovered from `.pi/extensions/` and registers `get_today_events`, `get_calendar_events`, and `get_upcoming` when `CALDAV_USERNAME` and `CALDAV_APP_PASSWORD` are set.
 
 ---
 
