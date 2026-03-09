@@ -179,40 +179,57 @@ async function handleDM(message: Message): Promise<void> {
       return "";
     }
 
-    const unsub = s.subscribe((event) => {
-      if (event.type === "message_update" && event.assistantMessageEvent) {
-        const ev = event.assistantMessageEvent;
-        if (ev.type === "text_delta" && ev.delta) {
-          buffer += ev.delta;
-          if (buffer.length >= CHUNK_SIZE) {
-            const chunks = chunkText(buffer);
-            buffer = chunks.pop() ?? "";
-            for (const chunk of chunks) {
-              const opts = !firstChunkSent
-                ? { reply: { messageReference: message } }
-                : {};
-              firstChunkSent = true;
-              pendingSends.push(channel.send({ content: chunk, ...opts }));
+    const unsub = s.subscribe((event: Record<string, unknown>) => {
+      // Log every event type for debugging
+      const etype = event.type as string;
+      if (etype === "message_update") {
+        const ae = event.assistantMessageEvent as Record<string, unknown> | undefined;
+        if (ae) {
+          console.log("[Discord bridge] Event:", etype, "sub:", ae.type);
+          if (ae.type === "text_delta" && ae.delta) {
+            buffer += ae.delta as string;
+            if (buffer.length >= CHUNK_SIZE) {
+              const chunks = chunkText(buffer);
+              buffer = chunks.pop() ?? "";
+              for (const chunk of chunks) {
+                const opts = !firstChunkSent
+                  ? { reply: { messageReference: message } }
+                  : {};
+                firstChunkSent = true;
+                pendingSends.push(channel.send({ content: chunk, ...opts }));
+              }
             }
           }
-        } else if (ev.type === "text_end" && typeof (ev as { content?: string }).content === "string") {
-          buffer += (ev as { content: string }).content;
         }
-      } else if (event.type === "message_end" && (event as { message?: unknown }).message) {
-        const m = (event as { message: { role?: string; content?: unknown } }).message;
+      } else {
+        console.log("[Discord bridge] Event:", etype, JSON.stringify(event).slice(0, 300));
+      }
+
+      // Capture from message_end
+      if (etype === "message_end" && event.message) {
+        const m = event.message as { role?: string; content?: unknown };
         if (m.role === "assistant") {
           lastAssistantText = extractTextFromMessage(m);
+          console.log("[Discord bridge] Captured assistant text from message_end:", lastAssistantText.slice(0, 100));
         }
-      } else if (event.type === "turn_end" && (event as { message?: unknown }).message) {
-        const m = (event as { message: { role?: string; content?: unknown } }).message;
+      }
+
+      // Capture from turn_end
+      if (etype === "turn_end" && event.message) {
+        const m = event.message as { role?: string; content?: unknown };
         if (m.role === "assistant") {
           lastAssistantText = extractTextFromMessage(m);
+          console.log("[Discord bridge] Captured assistant text from turn_end:", lastAssistantText.slice(0, 100));
         }
-      } else if (event.type === "agent_end" && (event as { messages?: unknown[] }).messages) {
-        const msgs = (event as { messages: { role?: string; content?: unknown }[] }).messages;
+      }
+
+      // Capture from agent_end
+      if (etype === "agent_end" && event.messages) {
+        const msgs = event.messages as { role?: string; content?: unknown }[];
         const last = [...msgs].reverse().find((m) => m.role === "assistant");
         if (last) {
           lastAssistantText = extractTextFromMessage(last);
+          console.log("[Discord bridge] Captured assistant text from agent_end:", lastAssistantText.slice(0, 100));
         }
       }
     });
