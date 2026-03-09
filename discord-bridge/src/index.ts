@@ -71,14 +71,34 @@ async function sendToDiscord(
 
 async function handleDM(message: Message): Promise<void> {
   if (message.author.bot) return;
-  if (!message.channel.isDMBased()) return;
+  if (!message.channel.isDMBased()) {
+    console.log("[Discord bridge] Ignoring non-DM message (use DMs to talk to Alfred)");
+    return;
+  }
 
   const channel = message.channel as DMChannel;
   const content = message.content?.trim();
-  if (!content) return;
+
+  if (!content) {
+    console.log("[Discord bridge] Received DM with empty content - Message Content Intent may be disabled");
+    try {
+      await channel.send({
+        content:
+          "I didn't receive your message. Enable **Message Content Intent** in the Discord Developer Portal: Bot → Privileged Gateway Intents → Message Content Intent.",
+        reply: { messageReference: message },
+      });
+    } catch {
+      // Ignore send errors
+    }
+    return;
+  }
+
+  console.log("[Discord bridge] Processing DM:", content.slice(0, 50) + (content.length > 50 ? "..." : ""));
 
   try {
+    console.log("[Discord bridge] Getting/creating Pi session...");
     const s = await getOrCreateSession();
+    console.log("[Discord bridge] Session ready, sending prompt");
 
     if (s.isStreaming) {
       await channel.send({
@@ -116,6 +136,7 @@ async function handleDM(message: Message): Promise<void> {
     await s.prompt(content);
 
     unsub();
+    console.log("[Discord bridge] Prompt complete");
 
     if (buffer.trim()) {
       const replyTo = firstChunkSent ? undefined : message;
@@ -123,11 +144,16 @@ async function handleDM(message: Message): Promise<void> {
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[Discord bridge] Error:", err);
-    await channel.send({
-      content: `Something went wrong: ${msg.slice(0, 500)}`,
-      reply: { messageReference: message },
-    });
+    const stack = err instanceof Error ? err.stack : undefined;
+    console.error("[Discord bridge] Error:", msg, stack);
+    try {
+      await channel.send({
+        content: `Something went wrong: ${msg.slice(0, 500)}`,
+        reply: { messageReference: message },
+      });
+    } catch (sendErr) {
+      console.error("[Discord bridge] Failed to send error to user:", sendErr);
+    }
   }
 }
 
