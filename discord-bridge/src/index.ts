@@ -55,14 +55,30 @@ function formatErrorForUser(err: unknown): string {
   return msg.length > 200 ? msg.slice(0, 200) + "…" : msg;
 }
 
-async function getOrCreateSession(): Promise<AgentSession> {
-  if (session) return session;
+async function getOrCreateSession(forceNew = false): Promise<AgentSession> {
+  if (session && !forceNew) return session;
 
-  const sessionManager = SessionManager.continueRecent(ALFRED_CWD, SESSION_DIR);
-  const { session: s } = await createAgentSession({
+  if (session) {
+    session.dispose();
+    session = null;
+  }
+
+  // Start fresh — previous sessions from broken runs can corrupt context
+  const sessionManager = forceNew
+    ? SessionManager.create(ALFRED_CWD, SESSION_DIR)
+    : SessionManager.create(ALFRED_CWD, SESSION_DIR);
+
+  console.log("[Discord bridge] Creating new Pi session");
+  const { session: s, modelFallbackMessage } = await createAgentSession({
     cwd: ALFRED_CWD,
     sessionManager,
   });
+
+  if (modelFallbackMessage) {
+    console.log("[Discord bridge] Model fallback:", modelFallbackMessage);
+  }
+
+  console.log("[Discord bridge] Model:", s.model?.provider, s.model?.id ?? "NONE");
   session = s;
   return session;
 }
@@ -123,6 +139,19 @@ async function handleDM(message: Message): Promise<void> {
       });
     } catch {
       // Ignore send errors
+    }
+    return;
+  }
+
+  // Handle commands
+  if (content.toLowerCase() === "/new") {
+    console.log("[Discord bridge] User requested new session");
+    try {
+      await getOrCreateSession(true);
+      await channel.send({ content: "Started a fresh session.", reply: { messageReference: message } });
+    } catch (err) {
+      console.error("[Discord bridge] Failed to create new session:", err);
+      await channel.send({ content: "Failed to reset session.", reply: { messageReference: message } });
     }
     return;
   }
