@@ -113,6 +113,7 @@ Set these in your Railway service settings:
 | `OPENAI_API_KEY` | At least one | OpenAI API key |
 | `GEMINI_API_KEY` | At least one | Google Gemini API key |
 | `DISCORD_BOT_TOKEN` | Optional | Discord bot token — enables DM bridge |
+| `DISCORD_PROMPT_TIMEOUT_MS` | No | Max time per request in ms (default: 300000 = 5 min) |
 | `SSH_PASSWORD` | No | Root SSH password fallback (default: `changeme`) |
 | `RAILWAY_RUN_UID` | **Yes** | Set to `0` — required for volumes to mount correctly |
 

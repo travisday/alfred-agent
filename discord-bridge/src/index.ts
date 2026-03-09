@@ -24,8 +24,35 @@ const ALFRED_CWD = "/alfred";
 const SESSION_DIR = "/alfred/.pi/sessions/discord";
 const DISCORD_MSG_LIMIT = 2000;
 const CHUNK_SIZE = 1900;
+const DEFAULT_PROMPT_TIMEOUT_MS = 300_000; // 5 min
+const REASSURANCE_INTERVAL_MS = 60_000; // Send "still working" every 60s
+
+const PROMPT_TIMEOUT_MS = parseInt(process.env.DISCORD_PROMPT_TIMEOUT_MS ?? "", 10) || DEFAULT_PROMPT_TIMEOUT_MS;
 
 let session: AgentSession | null = null;
+let processing = false;
+
+function formatErrorForUser(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  // User-friendly mappings for common errors
+  if (msg.includes("timed out") || msg.includes("timeout")) {
+    return "That took too long. Try a simpler question or try again.";
+  }
+  if (msg.includes("API key") || msg.includes("authentication") || msg.includes("401") || msg.includes("403")) {
+    return "There's an issue with the AI provider credentials. Check your API keys in Railway.";
+  }
+  if (msg.includes("rate limit") || msg.includes("429")) {
+    return "Rate limited—please wait a moment and try again.";
+  }
+  if (msg.includes("CalDAV") || msg.includes("calendar")) {
+    return "Calendar lookup failed. Check CalDAV credentials (CALDAV_USERNAME, CALDAV_APP_PASSWORD) if you use calendar features.";
+  }
+  if (msg.includes("network") || msg.includes("ECONNREFUSED") || msg.includes("ENOTFOUND")) {
+    return "Network error. Alfred will retry when you send another message.";
+  }
+  // Generic fallback - keep it short, no stack traces
+  return msg.length > 200 ? msg.slice(0, 200) + "…" : msg;
+}
 
 async function getOrCreateSession(): Promise<AgentSession> {
   if (session) return session;
@@ -101,6 +128,20 @@ async function handleDM(message: Message): Promise<void> {
 
   console.log("[Discord bridge] Processing DM:", content.slice(0, 50) + (content.length > 50 ? "..." : ""));
 
+  if (processing) {
+    console.log("[Discord bridge] Busy, rejecting concurrent message");
+    try {
+      await channel.send({
+        content: "Still working on that—give me a moment.",
+        reply: { messageReference: message },
+      });
+    } catch {
+      // Ignore
+    }
+    return;
+  }
+
+  processing = true;
   try {
     console.log("[Discord bridge] Getting/creating Pi session...");
     const s = await getOrCreateSession();
@@ -118,6 +159,7 @@ async function handleDM(message: Message): Promise<void> {
 
     let buffer = "";
     let firstChunkSent = false;
+    const pendingSends: Promise<unknown>[] = [];
 
     const unsub = s.subscribe((event) => {
       if (event.type === "message_update" && event.assistantMessageEvent) {
@@ -132,16 +174,39 @@ async function handleDM(message: Message): Promise<void> {
                 ? { reply: { messageReference: message } }
                 : {};
               firstChunkSent = true;
-              channel.send({ content: chunk, ...opts });
+              pendingSends.push(channel.send({ content: chunk, ...opts }));
             }
           }
         }
       }
     });
 
-    await s.prompt(content);
+    const promptPromise = s.prompt(content);
+    let timeoutId: ReturnType<typeof setTimeout>;
+    let reassuranceId: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        s.abort();
+        reject(new Error("Request timed out"));
+      }, PROMPT_TIMEOUT_MS);
+    });
+
+    // Send "still working" every 60s so user knows we haven't hung
+    const sendReassurance = () => {
+      channel.sendTyping().catch(() => {});
+      reassuranceId = setTimeout(sendReassurance, REASSURANCE_INTERVAL_MS);
+    };
+    reassuranceId = setTimeout(sendReassurance, REASSURANCE_INTERVAL_MS);
+
+    try {
+      await Promise.race([promptPromise, timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutId!);
+      clearTimeout(reassuranceId);
+    }
 
     unsub();
+    await Promise.all(pendingSends);
     console.log("[Discord bridge] Prompt complete");
 
     if (buffer.trim()) {
@@ -152,16 +217,27 @@ async function handleDM(message: Message): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err);
     const stack = err instanceof Error ? err.stack : undefined;
     console.error("[Discord bridge] Error:", msg, stack);
+    const userMsg = formatErrorForUser(err);
     try {
       await channel.send({
-        content: `Something went wrong: ${msg.slice(0, 500)}`,
+        content: `Sorry, something went wrong: ${userMsg}`,
         reply: { messageReference: message },
       });
     } catch (sendErr) {
       console.error("[Discord bridge] Failed to send error to user:", sendErr);
     }
+  } finally {
+    processing = false;
   }
 }
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[Discord bridge] Unhandled rejection:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[Discord bridge] Uncaught exception:", err);
+});
 
 async function main(): Promise<void> {
   const token = process.env.DISCORD_BOT_TOKEN;
