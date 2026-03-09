@@ -72,7 +72,11 @@ async function sendToDiscord(
 
 async function handleDM(message: Message): Promise<void> {
   if (message.author.bot) return;
-  if (!message.channel.isDMBased()) {
+
+  const isDM = message.channel.isDMBased();
+  console.log("[Discord bridge] Message received:", { isDM, channelType: message.channel.type, hasContent: !!message.content?.trim() });
+
+  if (!isDM) {
     console.log("[Discord bridge] Ignoring non-DM message (use DMs to talk to Alfred)");
     return;
   }
