@@ -71,9 +71,18 @@ chmod 644 /etc/profile.d/railway-env.sh
 echo "root:${SSH_PASSWORD:-changeme}" | chpasswd
 /usr/sbin/sshd
 
+# --- Discord bridge (optional) ---
+if [ -n "$DISCORD_BOT_TOKEN" ] && [ -d /opt/discord-bridge ]; then
+  node /opt/discord-bridge/dist/index.js &
+  echo "Discord bridge started"
+fi
+
 echo "==============================="
 echo " Alfred is online."
 echo " Connect via: ssh alfred"
+if [ -n "$DISCORD_BOT_TOKEN" ]; then
+  echo " Discord: DM the bot to talk to Alfred"
+fi
 echo "==============================="
 
 # Keep container alive

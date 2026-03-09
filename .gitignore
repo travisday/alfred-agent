@@ -4,6 +4,10 @@ node_modules/
 # CalDAV extension deps (installed at Docker build)
 .pi/extensions/caldav/node_modules/
 
+# Discord bridge (installed/built at Docker build)
+discord-bridge/node_modules/
+discord-bridge/dist/
+
 # OS generated files
 .DS_Store
 .DS_Store?

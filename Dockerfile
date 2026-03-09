@@ -23,6 +23,10 @@ COPY .pi/ /opt/alfred-pi-config/
 # Install CalDAV extension dependencies
 RUN cd /opt/alfred-pi-config/extensions/caldav && npm install
 
+# Discord bridge
+COPY discord-bridge/ /opt/discord-bridge/
+RUN cd /opt/discord-bridge && npm install && npm run build
+
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 

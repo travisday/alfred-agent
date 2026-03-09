@@ -26,6 +26,8 @@ Deploy your own personal AI assistant on [Railway](https://railway.com) — acce
   └───────────┘
 ```
 
+Optional: With `DISCORD_BOT_TOKEN` set, a Discord bridge runs in the same container. DM the bot to talk to Alfred from Discord — same workspace, same session, no SSH needed.
+
 - **Pi agent** runs on-demand — state lives in markdown files on a persistent volume
 - **LLM inference** is handled by your chosen provider's API (no GPU needed on the server)
 - **Tailscale** provides secure private networking — no ports exposed to the internet
@@ -68,7 +70,19 @@ Optional:
 
 When configured, Alfred can use `get_today_events`, `get_calendar_events`, and `get_upcoming` to read your schedule.
 
-### 3. LLM Provider API Key
+### 3. Discord (optional)
+
+To talk to Alfred via Discord DMs, set `DISCORD_BOT_TOKEN`:
+
+1. Create an application at [Discord Developer Portal](https://discord.com/developers/applications)
+2. Go to **Bot** → **Add Bot** → copy the token
+3. Enable **Message Content Intent** (Privileged Gateway Intents)
+4. Add the bot to a server (or use the DM link from the OAuth2 URL generator)
+5. Set `DISCORD_BOT_TOKEN` in Railway
+
+The bridge creates the Pi session on your first DM (agent on-demand). Conversation persists across messages and container restarts.
+
+### 4. LLM Provider API Key
 
 Alfred uses the [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) under the hood, which supports multiple LLM providers. You need an API key for at least one.
 
@@ -98,6 +112,7 @@ Set these in your Railway service settings:
 | `ANTHROPIC_API_KEY` | At least one | Anthropic API key |
 | `OPENAI_API_KEY` | At least one | OpenAI API key |
 | `GEMINI_API_KEY` | At least one | Google Gemini API key |
+| `DISCORD_BOT_TOKEN` | Optional | Discord bot token — enables DM bridge |
 | `SSH_PASSWORD` | No | Root SSH password fallback (default: `changeme`) |
 | `RAILWAY_RUN_UID` | **Yes** | Set to `0` — required for volumes to mount correctly |
 
@@ -207,7 +222,13 @@ If you want to customize it, edit `.pi/SYSTEM.md` in this repo and redeploy:
 
 ---
 
-## Connecting from Your Phone
+## Connecting to Alfred
+
+**Via SSH (terminal):** `ssh alfred` then `cd /alfred && pi`
+
+**Via Discord (if `DISCORD_BOT_TOKEN` is set):** DM the bot — no SSH needed. Same workspace and session as SSH.
+
+### From Your Phone
 
 1. Install [Tailscale](https://tailscale.com) on your phone and sign into the same account
 2. Install a terminal app:
@@ -262,6 +283,11 @@ If you want to customize it, edit `.pi/SYSTEM.md` in this repo and redeploy:
 **Volume data gone after redeploy**
 - Railway volumes persist across restarts but **not** across project deletions
 - Consider setting up git backup: `cd /alfred && git add -A && git commit -m "backup" && git push`
+
+**Discord bot doesn't respond**
+- Verify `DISCORD_BOT_TOKEN` is set in Railway
+- Enable **Message Content Intent** in the Discord Developer Portal
+- Check deploy logs for "Discord bridge started"
 
 ---
 
