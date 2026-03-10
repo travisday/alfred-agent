@@ -19,6 +19,9 @@ export interface TaskRecord {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  notificationState?: "pending" | "sent" | "failed";
+  notificationAttempts?: number;
+  notificationLastError?: string;
 }
 
 interface PersistedTasksFile {
@@ -92,6 +95,8 @@ export function createTask(opts: CreateTaskOptions): TaskRecord {
     callbackToken,
     createdAt: now,
     updatedAt: now,
+    notificationState: "pending",
+    notificationAttempts: 0,
   };
   tasks.set(id, record);
   scheduleSave();
@@ -118,7 +123,18 @@ export function getTask(id: string): TaskRecord | undefined {
 
 export function updateTask(
   id: string,
-  patch: Partial<Pick<TaskRecord, "status" | "summary" | "detailsUrl" | "completedAt">>
+  patch: Partial<
+    Pick<
+      TaskRecord,
+      | "status"
+      | "summary"
+      | "detailsUrl"
+      | "completedAt"
+      | "notificationState"
+      | "notificationAttempts"
+      | "notificationLastError"
+    >
+  >
 ): TaskRecord | undefined {
   const existing = tasks.get(id);
   if (!existing) return undefined;
@@ -130,6 +146,28 @@ export function updateTask(
   tasks.set(id, next);
   scheduleSave();
   return next;
+}
+
+export function listTasksByDiscordUser(discordUserId: string, limit = 20): TaskRecord[] {
+  return Array.from(tasks.values())
+    .filter((t) => t.discordUserId === discordUserId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, Math.max(1, limit));
+}
+
+export function recoverNonTerminalTasks(): number {
+  let recovered = 0;
+  for (const task of tasks.values()) {
+    if (task.status === "pending" || task.status === "running") {
+      const updated = updateTask(task.id, {
+        status: "failed",
+        completedAt: new Date().toISOString(),
+        summary: "Task interrupted by process restart before completion callback.",
+      });
+      if (updated) recovered++;
+    }
+  }
+  return recovered;
 }
 
 export interface TaskCompletionPayload {

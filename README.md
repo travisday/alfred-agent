@@ -82,6 +82,15 @@ To talk to Alfred via Discord DMs, set `DISCORD_BOT_TOKEN`:
 
 The bridge creates the Pi session on your first DM (agent on-demand). Conversation persists across messages and container restarts.
 
+Discord commands:
+
+- `/new` - reset interactive session context.
+- `/task <request>` - run work in background and get a completion DM when done.
+- `/status` - list your most recent task IDs and states.
+- `/status <taskId>` - inspect one task.
+
+Background tasks are explicit-first (`/task`), with optional automatic fallback for obviously long-running requests.
+
 ### 4. LLM Provider API Key
 
 Alfred uses the [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) under the hood, which supports multiple LLM providers. You need an API key for at least one.
@@ -114,8 +123,13 @@ Set these in your Railway service settings:
 | `GEMINI_API_KEY` | At least one | Google Gemini API key |
 | `DISCORD_BOT_TOKEN` | Optional | Discord bot token — enables DM bridge |
 | `DISCORD_PROMPT_TIMEOUT_MS` | No | Max time per request in ms (default: 300000 = 5 min) |
+| `DISCORD_TASK_TIMEOUT_MS` | No | Max runtime for background `/task` jobs in ms (default: 1800000 = 30 min) |
+| `DISCORD_DM_POLICY` | No | DM access policy: `open`, `owner_only`, or `allowlist` (default: `open`) |
+| `DISCORD_OWNER_USER_ID` | No | Required when `DISCORD_DM_POLICY=owner_only` |
+| `DISCORD_ALLOWED_USER_IDS` | No | Comma-separated Discord user IDs for `allowlist` mode |
 | `TASK_WEBHOOK_SECRET` | Optional | Secret for signing task completion webhooks (enables \"your task is done\" notifications in Discord) |
 | `TASK_WEBHOOK_PORT` | No | Port for the internal webhook HTTP server (default: 8080) |
+| `TASK_WEBHOOK_BASE_URL` | No | Internal callback base URL for background workers (default: `http://127.0.0.1:$TASK_WEBHOOK_PORT`) |
 | `SSH_PASSWORD` | No | Root SSH password fallback (default: `changeme`) |
 | `RAILWAY_RUN_UID` | **Yes** | Set to `0` — required for volumes to mount correctly |
 
@@ -231,6 +245,8 @@ If you want to customize it, edit `.pi/SYSTEM.md` in this repo and redeploy:
 
 **Via Discord (if `DISCORD_BOT_TOKEN` is set):** DM the bot — no SSH needed. Same workspace and session as SSH.
 
+For long work from Discord, prefer `/task ...` so Alfred can continue responding to other DMs while your task runs.
+
 ### From Your Phone
 
 1. Install [Tailscale](https://tailscale.com) on your phone and sign into the same account
@@ -291,6 +307,11 @@ If you want to customize it, edit `.pi/SYSTEM.md` in this repo and redeploy:
 - Verify `DISCORD_BOT_TOKEN` is set in Railway
 - Enable **Message Content Intent** in the Discord Developer Portal
 - Check deploy logs for "Discord bridge started"
+
+**Discord task finished but no completion DM**
+- Set `TASK_WEBHOOK_SECRET` so signed task callbacks and completion notifications are enabled
+- Check logs for `Task completion webhook listening` and `Invalid callback token/signature` messages
+- If DM access is restricted, verify `DISCORD_DM_POLICY` and user IDs are configured correctly
 
 ---
 
