@@ -28,6 +28,7 @@ const DEFAULT_TASK_TIMEOUT_MS = 1_800_000;
 const REASSURANCE_INTERVAL_MS = 60_000;
 const DEFAULT_WEBHOOK_PORT = 8080;
 const NOTIFICATION_MAX_RETRIES = 5;
+const BACKGROUND_REQUIRED_TOKEN = "__ALFRED_BACKGROUND_REQUIRED__";
 
 const PROMPT_TIMEOUT_MS = parseInt(process.env.DISCORD_PROMPT_TIMEOUT_MS ?? "", 10) || DEFAULT_PROMPT_TIMEOUT_MS;
 const TASK_TIMEOUT_MS = parseInt(process.env.DISCORD_TASK_TIMEOUT_MS ?? "", 10) || DEFAULT_TASK_TIMEOUT_MS;
@@ -161,6 +162,22 @@ function parseStatusCommand(content: string): string | null {
 function isLikelyLongRunningTask(content: string): boolean {
   const c = content.toLowerCase();
   const keywords = [
+    "sub agent",
+    "sub-agent",
+    "subagent",
+    "spawn agent",
+    "launch agent",
+    "launch a sub agent",
+    "need to read",
+    "read files",
+    "look up",
+    "search the repo",
+    "investigate",
+    "analyze",
+    "audit my",
+    "when it's done",
+    "when its done",
+    "let me know when done",
     "run tests",
     "full refactor",
     "debug this project",
@@ -170,6 +187,17 @@ function isLikelyLongRunningTask(content: string): boolean {
     "deploy",
   ];
   return keywords.some((k) => c.includes(k));
+}
+
+function buildForegroundPrompt(content: string): string {
+  return [
+    "You are in FAST-ANSWER mode for Discord.",
+    "If the answer is directly available from current chat context and loaded memory, answer normally.",
+    `If you need to read/search files, run commands, or gather additional project context, respond with exactly: ${BACKGROUND_REQUIRED_TOKEN}`,
+    "Do not add extra words when returning that token.",
+    "",
+    content,
+  ].join("\n");
 }
 
 function canUserAccessDM(userId: string): boolean {
@@ -371,10 +399,6 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
 }
 
 async function handleForegroundTask(message: Message, channel: DMChannel, content: string): Promise<void> {
-  const task = createTask({ message, channel, notifyOnCompletion: false });
-  const taskCtx = `[task:${task.id} msg:${message.id}]`;
-  console.log("[Discord bridge]", taskCtx, "Created foreground task");
-
   if (processing) {
     messageQueue.push({ message, content });
     await channel.send({
@@ -383,6 +407,10 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
     });
     return;
   }
+
+  const task = createTask({ message, channel, notifyOnCompletion: false });
+  const taskCtx = `[task:${task.id} msg:${message.id}]`;
+  console.log("[Discord bridge]", taskCtx, "Created foreground task");
 
   processing = true;
   updateTask(task.id, { status: "running" });
@@ -403,32 +431,10 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
     }
 
     await channel.sendTyping();
-    let buffer = "";
     let lastAssistantText = "";
-    let firstChunkSent = false;
-    const pendingSends: Promise<unknown>[] = [];
-
-    const flushBuffer = (): void => {
-      if (buffer.length === 0) return;
-      const chunks = chunkText(buffer);
-      buffer = chunks.pop() ?? "";
-      for (const chunk of chunks) {
-        const opts = !firstChunkSent ? { reply: { messageReference: message } } : {};
-        firstChunkSent = true;
-        pendingSends.push(channel.send({ content: chunk, ...opts }));
-      }
-    };
 
     const unsub = s.subscribe((event: Record<string, unknown>) => {
       const etype = event.type as string;
-      if (etype === "message_update") {
-        const ae = event.assistantMessageEvent as Record<string, unknown> | undefined;
-        if (ae?.type === "text_delta" && ae.delta) {
-          buffer += ae.delta as string;
-          if (buffer.length >= STREAM_FLUSH_CHARS) flushBuffer();
-        }
-        return;
-      }
       if (etype === "message_end" && event.message) {
         const m = event.message as { role?: string; content?: unknown };
         if (m.role === "assistant") lastAssistantText = extractTextFromMessage(m);
@@ -444,7 +450,6 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
       }
     });
 
-    const streamFlushId = setInterval(flushBuffer, STREAM_FLUSH_MS);
     let timeoutId: ReturnType<typeof setTimeout>;
     let reassuranceId: ReturnType<typeof setTimeout>;
 
@@ -462,24 +467,37 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
     reassuranceId = setTimeout(sendReassurance, REASSURANCE_INTERVAL_MS);
 
     try {
-      await Promise.race([s.prompt(content), timeoutPromise]);
+      await Promise.race([s.prompt(buildForegroundPrompt(content)), timeoutPromise]);
     } finally {
       clearTimeout(timeoutId!);
       clearTimeout(reassuranceId!);
       unsub();
-      clearInterval(streamFlushId);
-      await Promise.all(pendingSends);
     }
 
-    const textToSend = lastAssistantText.trim() || buffer.trim();
+    const textToSend = lastAssistantText.trim();
+    if (textToSend === BACKGROUND_REQUIRED_TOKEN) {
+      const bgTask = createTask({ message, channel, notifyOnCompletion: true });
+      updateTask(task.id, {
+        status: "cancelled",
+        summary: `Escalated to background task ${bgTask.id} because additional context lookup was required.`,
+        completedAt: new Date().toISOString(),
+      });
+      await channel.send({
+        content: `This needs deeper lookup, so I started background task \`${bgTask.id}\`. I will DM you when it is done.`,
+        reply: { messageReference: message },
+      });
+      void runBackgroundTask(bgTask, content);
+      return;
+    }
+
     if (textToSend) {
-      await sendToDiscord(channel, textToSend, firstChunkSent ? undefined : message);
+      await sendToDiscord(channel, textToSend, message);
       updateTask(task.id, {
         status: "completed",
         summary: textToSend.slice(0, 600),
         completedAt: new Date().toISOString(),
       });
-    } else if (!firstChunkSent) {
+    } else {
       await channel.send({
         content: "I did not get a response from Alfred. Try again.",
         reply: { messageReference: message },
@@ -492,6 +510,9 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
     }
   } catch (err) {
     const userMsg = formatErrorForUser(err);
+    const msg = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    console.error("[Discord bridge]", taskCtx, "Foreground task failed:", msg, stack);
     updateTask(task.id, {
       status: "failed",
       summary: userMsg,
