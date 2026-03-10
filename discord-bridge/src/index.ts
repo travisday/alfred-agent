@@ -390,8 +390,10 @@ async function sendTaskCompletionNotification(task: TaskRecord): Promise<void> {
     }
     const text = parts.join("\n");
 
-    const replyOpts = { reply: { messageReference: { messageId: task.originMessageId } } } as const;
-    await dm.send({ content: text, ...replyOpts });
+    await dm.send({
+      content: text,
+      reply: { messageReference: task.originMessageId },
+    });
   } catch (err) {
     console.error("[Discord bridge] Failed to send task completion notification:", err);
   }
