@@ -24,6 +24,8 @@ const ALFRED_CWD = "/alfred";
 const SESSION_DIR = "/alfred/.pi/sessions/discord";
 const DISCORD_MSG_LIMIT = 2000;
 const CHUNK_SIZE = 1900;
+const STREAM_FLUSH_CHARS = 400; // Send to Discord when we have this many chars (don't wait for 1900)
+const STREAM_FLUSH_MS = 2500; // Also flush every N ms so short replies appear
 const DEFAULT_PROMPT_TIMEOUT_MS = 300_000; // 5 min
 const REASSURANCE_INTERVAL_MS = 60_000; // Send "still working" every 60s
 
@@ -194,6 +196,20 @@ async function handleDM(message: Message): Promise<void> {
     let lastAssistantText = ""; // Fallback from message_end/turn_end when streaming misses
     let firstChunkSent = false;
     const pendingSends: Promise<unknown>[] = [];
+    let streamFlushId: ReturnType<typeof setInterval> | null = null;
+
+    const flushBuffer = (): void => {
+      if (buffer.length === 0) return;
+      const chunks = chunkText(buffer);
+      buffer = chunks.pop() ?? "";
+      for (const chunk of chunks) {
+        const opts = !firstChunkSent
+          ? { reply: { messageReference: message } }
+          : {};
+        firstChunkSent = true;
+        pendingSends.push(channel.send({ content: chunk, ...opts }));
+      }
+    };
 
     function extractTextFromMessage(msg: { content?: unknown }): string {
       if (!msg?.content) return "";
@@ -214,21 +230,10 @@ async function handleDM(message: Message): Promise<void> {
       const etype = event.type as string;
       if (etype === "message_update") {
         const ae = event.assistantMessageEvent as Record<string, unknown> | undefined;
-        if (ae) {
-          console.log("[Discord bridge] Event:", etype, "sub:", ae.type);
-          if (ae.type === "text_delta" && ae.delta) {
-            buffer += ae.delta as string;
-            if (buffer.length >= CHUNK_SIZE) {
-              const chunks = chunkText(buffer);
-              buffer = chunks.pop() ?? "";
-              for (const chunk of chunks) {
-                const opts = !firstChunkSent
-                  ? { reply: { messageReference: message } }
-                  : {};
-                firstChunkSent = true;
-                pendingSends.push(channel.send({ content: chunk, ...opts }));
-              }
-            }
+        if (ae?.type === "text_delta" && ae.delta) {
+          buffer += ae.delta as string;
+          if (buffer.length >= STREAM_FLUSH_CHARS) {
+            flushBuffer();
           }
         }
       } else {
@@ -264,6 +269,9 @@ async function handleDM(message: Message): Promise<void> {
       }
     });
 
+    // Flush buffer periodically so short replies appear without waiting for prompt() to resolve
+    streamFlushId = setInterval(flushBuffer, STREAM_FLUSH_MS);
+
     const promptPromise = s.prompt(content);
     let timeoutId: ReturnType<typeof setTimeout>;
     let reassuranceId: ReturnType<typeof setTimeout>;
@@ -286,10 +294,13 @@ async function handleDM(message: Message): Promise<void> {
     } finally {
       clearTimeout(timeoutId!);
       clearTimeout(reassuranceId);
+      unsub();
+      if (streamFlushId) {
+        clearInterval(streamFlushId);
+        streamFlushId = null;
+      }
+      await Promise.all(pendingSends);
     }
-
-    unsub();
-    await Promise.all(pendingSends);
     console.log("[Discord bridge] Prompt complete");
 
     // Prefer lastAssistantText (complete final message) over buffer (streamed, may be incomplete)
@@ -300,7 +311,7 @@ async function handleDM(message: Message): Promise<void> {
       }
       const replyTo = firstChunkSent ? undefined : message;
       await sendToDiscord(channel, textToSend, replyTo);
-    } else {
+    } else if (!firstChunkSent) {
       console.log("[Discord bridge] No text captured from agent (buffer empty, no message_end/turn_end)");
       try {
         await channel.send({

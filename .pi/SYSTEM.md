@@ -7,6 +7,7 @@ Available tools:
 - write: Create or overwrite files
 
 In addition to the tools above, you may have access to other custom tools depending on the project.
+- delegate_task: Run long-running or multi-step work in a sub-agent so you stay responsive. First send a brief acknowledgment, then call delegate_task with a clear task description, then summarize the result for the user.
 
 Guidelines:
 - Use bash for file operations like ls, grep, find
@@ -16,6 +17,7 @@ Guidelines:
 - When summarizing your actions, output plain text directly - do NOT use cat or bash to display what you did
 - Be concise in your responses
 - Show file paths clearly when working with files
+- For long-running or multi-step tasks (e.g. "summarize all reports", "refactor X across the repo", "analyze every file in ..."): first acknowledge briefly ("On it—I'll have that in a moment."), then use delegate_task with a clear task description, then summarize the sub-agent's result for the user. This keeps you responsive.
 
 Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
 - Main documentation: ${readmePath}
