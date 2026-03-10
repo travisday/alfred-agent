@@ -114,6 +114,8 @@ Set these in your Railway service settings:
 | `GEMINI_API_KEY` | At least one | Google Gemini API key |
 | `DISCORD_BOT_TOKEN` | Optional | Discord bot token — enables DM bridge |
 | `DISCORD_PROMPT_TIMEOUT_MS` | No | Max time per request in ms (default: 300000 = 5 min) |
+| `TASK_WEBHOOK_SECRET` | Optional | Secret for signing task completion webhooks (enables \"your task is done\" notifications in Discord) |
+| `TASK_WEBHOOK_PORT` | No | Port for the internal webhook HTTP server (default: 8080) |
 | `SSH_PASSWORD` | No | Root SSH password fallback (default: `changeme`) |
 | `RAILWAY_RUN_UID` | **Yes** | Set to `0` — required for volumes to mount correctly |
 

@@ -6,19 +6,19 @@
  *
  * Required: DISCORD_BOT_TOKEN
  */
+import { createAgentSession, SessionManager, type AgentSession } from "@mariozechner/pi-coding-agent";
+import { Client, DMChannel, Events, GatewayIntentBits, Partials, type Message } from "discord.js";
+import http from "node:http";
+import crypto from "node:crypto";
 import {
-  createAgentSession,
-  SessionManager,
-  type AgentSession,
-} from "@mariozechner/pi-coding-agent";
-import {
-  Client,
-  DMChannel,
-  Events,
-  GatewayIntentBits,
-  Partials,
-  type Message,
-} from "discord.js";
+  createTask,
+  getTask,
+  updateTask,
+  type TaskCompletionPayload,
+  type TaskRecord,
+  verifyTaskCallback,
+  getPublicTaskInfo,
+} from "./tasks.js";
 
 const ALFRED_CWD = "/alfred";
 const SESSION_DIR = "/alfred/.pi/sessions/discord";
@@ -28,12 +28,23 @@ const STREAM_FLUSH_CHARS = 400; // Send to Discord when we have this many chars 
 const STREAM_FLUSH_MS = 2500; // Also flush every N ms so short replies appear
 const DEFAULT_PROMPT_TIMEOUT_MS = 300_000; // 5 min
 const REASSURANCE_INTERVAL_MS = 60_000; // Send "still working" every 60s
+const DEFAULT_WEBHOOK_PORT = 8080;
 
 const PROMPT_TIMEOUT_MS = parseInt(process.env.DISCORD_PROMPT_TIMEOUT_MS ?? "", 10) || DEFAULT_PROMPT_TIMEOUT_MS;
 
 let session: AgentSession | null = null;
 let processing = false;
 const messageQueue: { message: Message; content: string }[] = [];
+
+function getTaskWebhookSecret(): string | null {
+  const s = process.env.TASK_WEBHOOK_SECRET;
+  if (typeof s === "string" && s.trim().length > 0) return s.trim();
+  return null;
+}
+
+function computeHmacSignature(secret: string, body: string): string {
+  return crypto.createHmac("sha256", secret).update(body, "utf8").digest("hex");
+}
 
 function formatErrorForUser(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
@@ -157,6 +168,11 @@ async function handleDM(message: Message): Promise<void> {
     }
     return;
   }
+
+  // For now, tasks are implicitly created for each DM that triggers work.
+  // In the future this can be toggled via a user command or preference.
+  const task = createTask({ message, channel, notifyOnCompletion: true });
+  console.log("[Discord bridge] Created task", task.id, "for message", message.id);
 
   console.log("[Discord bridge] Processing DM:", content.slice(0, 50) + (content.length > 50 ? "..." : ""));
 
@@ -346,6 +362,149 @@ async function handleDM(message: Message): Promise<void> {
   }
 }
 
+async function sendTaskCompletionNotification(task: TaskRecord): Promise<void> {
+  if (!task.notifyOnCompletion || task.notifyChannel !== "same_channel") return;
+
+  try {
+    const client = globalDiscordClient;
+    if (!client) {
+      console.error("[Discord bridge] Cannot notify completion, Discord client not ready");
+      return;
+    }
+    const channel = await client.channels.fetch(task.discordChannelId);
+    if (!channel || !channel.isDMBased?.()) {
+      console.error("[Discord bridge] Cannot notify completion, channel missing or not DM:", task.discordChannelId);
+      return;
+    }
+
+    const dm = (await channel.fetch()) as DMChannel;
+    const statusLabel = task.status.toUpperCase();
+    const parts: string[] = [];
+    parts.push("**Your Alfred task is done.**");
+    parts.push(`Status: \`${statusLabel}\``);
+    if (task.summary) {
+      parts.push(`Summary: ${task.summary}`);
+    }
+    if (task.detailsUrl) {
+      parts.push(`Details: ${task.detailsUrl}`);
+    }
+    const text = parts.join("\n");
+
+    const replyOpts = { reply: { messageReference: { messageId: task.originMessageId } } } as const;
+    await dm.send({ content: text, ...replyOpts });
+  } catch (err) {
+    console.error("[Discord bridge] Failed to send task completion notification:", err);
+  }
+}
+
+let globalDiscordClient: Client | null = null;
+
+function startWebhookServer(): void {
+  const secret = getTaskWebhookSecret();
+  if (!secret) {
+    console.warn("[Discord bridge] TASK_WEBHOOK_SECRET not set, task completion webhook disabled");
+    return;
+  }
+
+  const port = parseInt(process.env.TASK_WEBHOOK_PORT ?? "", 10) || DEFAULT_WEBHOOK_PORT;
+
+  const server = http.createServer((req, res) => {
+    if (req.method !== "POST" || !req.url?.startsWith("/webhooks/task-completed")) {
+      res.statusCode = 404;
+      res.end("Not found");
+      return;
+    }
+
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 1024 * 1024) {
+        // 1MB limit
+        res.statusCode = 413;
+        res.end("Payload too large");
+        req.destroy();
+      }
+    });
+
+    req.on("end", () => {
+      try {
+        const providedSig = req.headers["x-task-signature"];
+        const hmac = computeHmacSignature(secret, body);
+        const sigString = Array.isArray(providedSig) ? providedSig[0] : providedSig ?? "";
+
+        if (!sigString || !crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(sigString))) {
+          console.warn("[Discord bridge] Invalid HMAC signature on task completion webhook");
+          res.statusCode = 401;
+          res.end("Invalid signature");
+          return;
+        }
+
+        const parsed = JSON.parse(body) as TaskCompletionPayload;
+        if (!parsed.task_id || !parsed.status) {
+          res.statusCode = 400;
+          res.end("task_id and status are required");
+          return;
+        }
+
+        const task = getTask(parsed.task_id);
+        if (!task) {
+          console.warn("[Discord bridge] Task not found for completion payload:", parsed.task_id);
+          res.statusCode = 404;
+          res.end("Task not found");
+          return;
+        }
+
+        // Optional per-task token in header for additional protection
+        const callbackTokenHeader = req.headers["x-task-callback-token"];
+        const callbackToken = Array.isArray(callbackTokenHeader)
+          ? callbackTokenHeader[0] ?? null
+          : callbackTokenHeader ?? null;
+
+        if (!verifyTaskCallback(task, callbackToken)) {
+          console.warn("[Discord bridge] Invalid callback token for task", task.id);
+          res.statusCode = 401;
+          res.end("Invalid callback token");
+          return;
+        }
+
+        if (task.status === "completed" || task.status === "failed" || task.status === "cancelled") {
+          res.statusCode = 200;
+          res.end("Already finalized");
+          return;
+        }
+
+        const completedAt = new Date().toISOString();
+        const updated = updateTask(task.id, {
+          status: parsed.status,
+          summary: parsed.summary,
+          detailsUrl: parsed.details_url,
+          completedAt,
+        });
+
+        if (!updated) {
+          res.statusCode = 500;
+          res.end("Failed to update task");
+          return;
+        }
+
+        void sendTaskCompletionNotification(updated);
+
+        res.statusCode = 200;
+        res.end("OK");
+      } catch (err) {
+        console.error("[Discord bridge] Error handling task completion webhook:", err);
+        res.statusCode = 500;
+        res.end("Internal error");
+      }
+    });
+  });
+
+  server.listen(port, () => {
+    console.log(`[Discord bridge] Task completion webhook listening on port ${port}`);
+  });
+}
+
 process.on("unhandledRejection", (reason, promise) => {
   console.error("[Discord bridge] Unhandled rejection:", reason);
 });
@@ -371,7 +530,9 @@ async function main(): Promise<void> {
   });
 
   client.on(Events.ClientReady, (c) => {
+    globalDiscordClient = client;
     console.log(`[Discord bridge] Logged in as ${c.user.tag}`);
+    startWebhookServer();
   });
 
   client.on(Events.MessageCreate, handleDM);
