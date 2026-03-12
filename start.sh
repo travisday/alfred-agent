@@ -77,6 +77,10 @@ if [ -n "$DISCORD_BOT_TOKEN" ] && [ -d /opt/discord-bridge ]; then
   echo "Discord bridge started"
 fi
 
+if [ -n "$TAVILY_API_KEY" ]; then
+  echo "Tavily web search enabled"
+fi
+
 echo "==============================="
 echo " Alfred is online."
 echo " Connect via: ssh alfred"

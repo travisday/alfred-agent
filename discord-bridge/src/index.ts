@@ -251,12 +251,16 @@ async function sendTaskCompletionNotification(task: TaskRecord): Promise<void> {
   }
 
   const dm = (await channel.fetch()) as DMChannel;
-  const statusLabel = task.status.toUpperCase();
   const parts: string[] = [];
-  parts.push("**Your Alfred task is done.**");
-  parts.push(`Task: \`${task.id}\``);
-  parts.push(`Status: \`${statusLabel}\``);
-  if (task.summary) parts.push(`Summary: ${task.summary}`);
+  if (task.summary) {
+    parts.push(task.summary);
+  } else if (task.status === "failed") {
+    parts.push("I hit an issue while working on that request.");
+  } else if (task.status === "cancelled") {
+    parts.push("I stopped that request before completion.");
+  } else {
+    parts.push("I finished working on that request.");
+  }
   if (task.detailsUrl) parts.push(`Details: ${task.detailsUrl}`);
 
   await dm.send({
@@ -319,7 +323,6 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
 
   const wrappedPrompt = [
     "This request is running in background task mode.",
-    `Task ID: ${publicInfo.taskId}`,
     "When complete, return a concise summary in your final assistant message.",
     "Focus on completing the request end-to-end without waiting for further user input.",
     "",
@@ -479,11 +482,11 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
       const bgTask = createTask({ message, channel, notifyOnCompletion: true });
       updateTask(task.id, {
         status: "cancelled",
-        summary: `Escalated to background task ${bgTask.id} because additional context lookup was required.`,
+        summary: "Escalated to background processing because additional context lookup was required.",
         completedAt: new Date().toISOString(),
       });
       await channel.send({
-        content: `This needs deeper lookup, so I started background task \`${bgTask.id}\`. I will DM you when it is done.`,
+        content: "This needs a deeper lookup. I am on it and will update you when it is done.",
         reply: { messageReference: message },
       });
       void runBackgroundTask(bgTask, content);
@@ -589,7 +592,7 @@ async function handleDM(message: Message): Promise<void> {
     const task = createTask({ message, channel, notifyOnCompletion: true });
     console.log("[Discord bridge]", `[task:${task.id} msg:${message.id}]`, "Created background task");
     await channel.send({
-      content: `Started background task \`${task.id}\`. I will DM you when it is done.`,
+      content: "Working on it now. I will update you when it is done.",
       reply: { messageReference: message },
     });
     void runBackgroundTask(task, backgroundPrompt);

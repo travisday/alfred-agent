@@ -91,7 +91,22 @@ Discord commands:
 
 Background tasks are explicit-first (`/task`), with optional automatic fallback for obviously long-running requests.
 
-### 4. LLM Provider API Key
+### 4. Web Search (optional — Tavily)
+
+To give Alfred live web search with source-backed results, set:
+
+| Variable | Description |
+|----------|-------------|
+| `TAVILY_API_KEY` | Tavily API key for Alfred's `web_search` tool |
+
+Get a key at [tavily.com](https://www.tavily.com/), then set `TAVILY_API_KEY` in Railway.
+
+Default behavior is cost-conscious:
+- basic search depth
+- small result set
+- optional deep page extraction only when needed
+
+### 5. LLM Provider API Key
 
 Alfred uses the [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) under the hood, which supports multiple LLM providers. You need an API key for at least one.
 
@@ -121,6 +136,7 @@ Set these in your Railway service settings:
 | `ANTHROPIC_API_KEY` | At least one | Anthropic API key |
 | `OPENAI_API_KEY` | At least one | OpenAI API key |
 | `GEMINI_API_KEY` | At least one | Google Gemini API key |
+| `TAVILY_API_KEY` | Optional | Enables Tavily-backed `web_search` tool |
 | `DISCORD_BOT_TOKEN` | Optional | Discord bot token — enables DM bridge |
 | `DISCORD_PROMPT_TIMEOUT_MS` | No | Max time per request in ms (default: 300000 = 5 min) |
 | `DISCORD_TASK_TIMEOUT_MS` | No | Max runtime for background `/task` jobs in ms (default: 1800000 = 30 min) |
