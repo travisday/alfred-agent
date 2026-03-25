@@ -15,8 +15,17 @@ if [ -d /opt/alfred-pi-config ]; then
 fi
 
 # --- Tailscale ---
+# Kernel TUN when /dev/net/tun exists (self-hosted Docker with --device /dev/net/tun + NET_ADMIN,
+# many VPS). Otherwise userspace — typical for Railway (no TUN device in the container).
 mkdir -p /alfred/.tailscale
-tailscaled --state=/alfred/.tailscale/tailscaled.state --tun=userspace-networking &
+TAILSCALE_ARGS=(--state=/alfred/.tailscale/tailscaled.state)
+if [ -e /dev/net/tun ]; then
+  echo "Tailscale: kernel TUN (/dev/net/tun present)"
+else
+  TAILSCALE_ARGS+=(--tun=userspace-networking)
+  echo "Tailscale: userspace (no /dev/net/tun — use: tailscale ssh root@alfred)"
+fi
+tailscaled "${TAILSCALE_ARGS[@]}" &
 
 # Wait for tailscaled to be ready (up to 10s)
 for i in $(seq 1 20); do
@@ -60,9 +69,18 @@ fi
 
 # --- Expose env vars to SSH sessions ---
 # Railway injects env vars into PID 1 only — SSH sessions don't inherit them.
-# Pass through everything except infra secrets and common noise.
+# Use null-delimited env and %q so values with commas/spaces/special chars do not break export.
 {
-  env | grep -vE '^(TS_AUTHKEY|SSH_PASSWORD|HOSTNAME|HOME|PATH|PWD|SHLVL|_)=' | sed 's/^/export /'
+  while IFS= read -r -d '' line; do
+    [ -z "$line" ] && continue
+    name="${line%%=*}"
+    value="${line#*=}"
+    case "$name" in
+      TS_AUTHKEY|SSH_PASSWORD|HOSTNAME|HOME|PATH|PWD|SHLVL|_|'') continue ;;
+    esac
+    [[ "$name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || continue
+    printf 'export %s=%q\n' "$name" "$value"
+  done < <(env -0)
   echo 'cd /alfred 2>/dev/null'
 } > /etc/profile.d/railway-env.sh 2>/dev/null || true
 chmod 644 /etc/profile.d/railway-env.sh

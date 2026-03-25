@@ -195,8 +195,10 @@ On first boot, the `/alfred` volume is empty. You'll want to set up a directory 
 ### Connect to Alfred
 
 ```bash
-ssh alfred
+tailscale ssh root@alfred
 ```
+
+(On Railway, plain `ssh` to the Tailnet IP often times out; see [SSH, SFTP, and file access](#ssh-sftp-and-file-access).)
 
 Tailscale SSH handles authentication automatically — no SSH keys needed.
 
@@ -257,7 +259,13 @@ If you want to customize it, edit `.pi/SYSTEM.md` in this repo and redeploy:
 
 ## Connecting to Alfred
 
-**Via SSH (terminal):** `ssh alfred` then `cd /alfred && pi`
+**Railway (default):** Plain `ssh` / `sftp` to Alfred’s Tailscale IP on port 22 often **times out** because Tailscale runs in **userspace** mode (Railway does not provide `/dev/net/tun` or `NET_ADMIN`). Use the **Tailscale CLI** after the [Tailscale app](https://tailscale.com/download) is running on your device:
+
+```bash
+tailscale ssh root@alfred
+```
+
+Then `cd /alfred && pi`. See [SSH, SFTP, and file access](#ssh-sftp-and-file-access) for SFTP and optional native SSH.
 
 **Via Discord (if `DISCORD_BOT_TOKEN` is set):** DM the bot — no SSH needed. Same workspace and session as SSH.
 
@@ -270,15 +278,56 @@ For long work from Discord, prefer `/task ...` so Alfred can continue responding
    - **[Moshi](https://apps.apple.com/app/moshi-ai-terminal/id6504464458)** — built for AI agents, push notifications, voice input, mosh support
    - **[Blink Shell](https://blink.sh)** — open source, mature, excellent mosh support
    - **Termius** — cross-platform, SSH/mosh/SFTP
-3. Connect: `ssh alfred` (or `mosh alfred` for more stable mobile connections)
+3. Connect with **`tailscale ssh root@alfred`** when plain `ssh` to the Tailnet IP does not work (typical on Railway); or `mosh` if your client supports it with the same transport your setup uses
 4. Run Pi: `cd /alfred && pi`
+
+## SSH, SFTP, and file access
+
+### Why `ssh root@100.x` or SFTP can time out (Railway)
+
+Startup picks **kernel TUN** only if **`/dev/net/tun`** exists in the container (unusual on Railway). Otherwise it uses **userspace** Tailscale. In userspace mode, **inbound TCP to the Tailscale address on port 22** usually does **not** reach OpenSSH, so generic clients that open `sftp://` or `ssh` to `100.x.x.x:22` may hang or time out. **Railway does not provide `/dev/net/tun` or `NET_ADMIN`**, so Alfred almost always runs userspace there. Community discussion: [Railway Help Station](https://station.railway.com) (search for TUN / privileged).
+
+**On Railway, use:**
+
+- **Shell:** `tailscale ssh root@alfred` (Tailscale app running on your Mac/PC/phone).
+- **Files:** Prefer editing through that shell, sync tools, or SFTP with a client that can use **`tailscale ssh` as the SSH program** (or `ProxyCommand`; see [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh)).
+
+### Native SSH and SFTP to `/alfred` (self-hosted / VPS with TUN)
+
+If you run this image on a host that provides **`/dev/net/tun`** and **`CAP_NET_ADMIN`** (typical Docker flags: `--device /dev/net/tun --cap-add=NET_ADMIN`, or privileged on a VPS), startup **automatically** uses kernel TUN — check deploy logs for `Tailscale: kernel TUN`.
+
+Then from a device on your tailnet, **verify** (replace the IP with Alfred’s Tailscale IP from `tailscale status` or the admin console):
+
+```bash
+ssh root@100.x.x.x
+# password: value of SSH_PASSWORD in your env
+
+sftp root@100.x.x.x
+sftp> cd /alfred
+sftp> ls
+```
+
+Mount the folder with **Cyberduck**, **Transmit**, **sshfs**, or your editor using **SFTP/SSH**, user **`root`**, password **`SSH_PASSWORD`**, remote path **`/alfred`**.
+
+Use a **strong `SSH_PASSWORD`**; your tailnet ACLs still matter.
+
+### Manual checklist (kernel TUN mode only)
+
+When deploy logs show **`Tailscale: kernel TUN`** and Tailscale is up:
+
+| Step | Command / action |
+|------|------------------|
+| 1 | `tailscale status` on your laptop — `alfred` online |
+| 2 | `ssh root@<alfred-tailscale-ip>` — login with `SSH_PASSWORD` |
+| 3 | `sftp root@<ip>` — `cd /alfred`, list files |
+| 4 | Optional: Cyberduck / sshfs to same host, path `/alfred` |
 
 ---
 
 ## Daily Usage
 
-1. Open your terminal app
-2. `ssh alfred`
+1. Open your terminal app (Tailscale running on your device)
+2. `tailscale ssh root@alfred` (or native `ssh root@<tailscale-ip>` if you use kernel TUN — see [SSH, SFTP, and file access](#ssh-sftp-and-file-access))
 3. `cd /alfred && pi`
 4. Talk to Alfred — he reads your markdown files for context
 5. When done, quit Pi (`Ctrl+C`). State is saved in the markdown files.
@@ -307,8 +356,14 @@ For long work from Discord, prefer `/task ...` so Alfred can continue responding
 - Auth keys expire — generate a new one if needed
 
 **SSH connection drops on mobile**
-- Use `mosh alfred` instead of `ssh alfred` for more stable mobile connections
+- Use `mosh` if your setup supports it for more stable mobile connections
 - Make sure your terminal app supports mosh
+
+**`ssh` / `sftp` to Alfred’s Tailscale IP times out**
+- On **Railway**, there is usually **no `/dev/net/tun`**, so Tailscale runs in **userspace**; plain TCP to `100.x.x.x:22` does not reach `sshd`. Use **`tailscale ssh root@alfred`**. For native SFTP, run Alfred on a host that exposes **`/dev/net/tun`** + **`NET_ADMIN`** so logs show **`Tailscale: kernel TUN`** (see [SSH, SFTP, and file access](#ssh-sftp-and-file-access)).
+
+**`-bash: export: ... not a valid identifier` when logging in**
+- Usually fixed in current `start.sh` (safe quoting for Railway env). Redeploy; if it persists, check for unusual env var names in Railway.
 
 **Pi can't find LLM models**
 - Verify your API key env var is set in Railway
