@@ -101,7 +101,7 @@ Set `PROACTIVE_ENABLED=1` to run three daily check-ins (default **8:00, 12:00, 1
 |----------|-------------|
 | `PROACTIVE_ENABLED` | Set to `1` to start the proactive scheduler |
 | `PROACTIVE_SCHEDULE` | Three comma-separated local times: morning, midday, evening (default `8:00,12:00,18:00`) |
-| `PROACTIVE_MODEL` | Model passed to `pi -p` (default `groq:qwen-qwq-32b`) |
+| `PROACTIVE_MODEL` | Model passed to `pi -p` (default `groq:gpt-oss-20b`) |
 | `PROACTIVE_TZ` | IANA timezone for scheduling (default `America/Los_Angeles`) |
 | `PROACTIVE_POLL_SECS` | How often to check the clock in seconds (default `300`) |
 | `DISCORD_PROACTIVE_USER_ID` | Optional; if unset, `DISCORD_OWNER_USER_ID` is used as the DM recipient |
@@ -163,7 +163,7 @@ Set these in your Railway service settings:
 | `DISCORD_PROACTIVE_USER_ID` | No | DM recipient for proactive check-ins; defaults to `DISCORD_OWNER_USER_ID` |
 | `PROACTIVE_ENABLED` | No | Set to `1` to enable scheduled morning/midday/evening check-ins |
 | `PROACTIVE_SCHEDULE` | No | Three comma-separated times (default `8:00,12:00,18:00` local `PROACTIVE_TZ`) |
-| `PROACTIVE_MODEL` | No | Model for proactive `pi -p` runs (default `groq:qwen-qwq-32b`) |
+| `PROACTIVE_MODEL` | No | Model for proactive `pi -p` runs (default `groq:gpt-oss-20b`) |
 | `PROACTIVE_TZ` | No | IANA timezone for proactive scheduler (default `America/Los_Angeles`) |
 | `PROACTIVE_POLL_SECS` | No | Poll interval in seconds (default `300`) |
 | `TASK_WEBHOOK_SECRET` | Optional | Secret for signing task completion webhooks (enables \"your task is done\" notifications in Discord) |
