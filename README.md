@@ -66,9 +66,9 @@ Optional:
 | Variable | Description |
 |----------|-------------|
 | `CALDAV_SERVER_URL` | Default: `https://caldav.icloud.com` |
-| `CALDAV_TIMEZONE` | Default: `America/Los_Angeles` |
+| `CALDAV_TIMEZONE` | IANA timezone (e.g. `America/Los_Angeles`) for displayed times, “today” in `get_today_events`, and date-only range strings in `get_calendar_events`. Default: `America/Los_Angeles` |
 
-When configured, Alfred can use `get_today_events`, `get_calendar_events`, and `get_upcoming` to read your schedule.
+When configured, Alfred can use `get_today_events`, `get_calendar_events`, and `get_upcoming` to read your schedule. Only calendars synced to this Apple ID over iCloud are available (not local-only “On My Mac” calendars).
 
 ### 3. Discord (optional)
 

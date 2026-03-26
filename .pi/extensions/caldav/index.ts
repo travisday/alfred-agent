@@ -9,7 +9,9 @@
  *
  * Optional:
  *   CALDAV_SERVER_URL - defaults to https://caldav.icloud.com
- *   CALDAV_TIMEZONE - defaults to America/Los_Angeles
+ *   CALDAV_TIMEZONE - IANA zone (e.g. America/Los_Angeles) for displaying times, for
+ *     "today" in get_today_events, and for interpreting date-only range strings in
+ *     get_calendar_events. Defaults to America/Los_Angeles.
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -18,6 +20,72 @@ import ICAL from "ical.js";
 
 const DEFAULT_SERVER = "https://caldav.icloud.com";
 const DEFAULT_TIMEZONE = "America/Los_Angeles";
+
+/** Date-only YYYY-MM-DD (no time component). */
+const ISO_DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** YYYY-MM-DD for `date` in the given IANA zone. */
+function calendarDateInZone(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+/**
+ * First instant (UTC) of the calendar day in `timeZone` that contains `ref`
+ * (local midnight in that zone).
+ */
+function startOfZonedCalendarDay(ref: Date, timeZone: string): Date {
+  const ymd = calendarDateInZone(ref, timeZone);
+  let lo = ref.getTime() - 3 * 24 * 60 * 60 * 1000;
+  let hi = ref.getTime() + 3 * 24 * 60 * 60 * 1000;
+  while (calendarDateInZone(new Date(lo), timeZone) >= ymd) lo -= 24 * 60 * 60 * 1000;
+  while (calendarDateInZone(new Date(hi), timeZone) < ymd) hi += 24 * 60 * 60 * 1000;
+  let left = lo;
+  let right = hi;
+  while (right - left > 1) {
+    const mid = Math.floor((left + right) / 2);
+    if (calendarDateInZone(new Date(mid), timeZone) < ymd) left = mid;
+    else right = mid;
+  }
+  return new Date(right);
+}
+
+/** Gregorian YYYY-MM-DD plus one civil day (for exclusive range ends). */
+function gregorianYmdPlusOne(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const u = new Date(Date.UTC(y, m - 1, d + 1));
+  return `${u.getUTCFullYear()}-${String(u.getUTCMonth() + 1).padStart(2, "0")}-${String(u.getUTCDate()).padStart(2, "0")}`;
+}
+
+/** Start of civil `ymd` (YYYY-MM-DD) in `timeZone`. */
+function startOfYmdInZone(ymd: string, timeZone: string): Date {
+  const [y, m, d] = ymd.split("-").map(Number);
+  let ref = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  for (let i = 0; i < 48; i++) {
+    const c = calendarDateInZone(ref, timeZone);
+    if (c === ymd) return startOfZonedCalendarDay(ref, timeZone);
+    if (c < ymd) ref = new Date(ref.getTime() + 60 * 60 * 1000);
+    else ref = new Date(ref.getTime() - 60 * 60 * 1000);
+  }
+  return startOfZonedCalendarDay(ref, timeZone);
+}
+
+function parseCalendarRangeStart(s: string, timeZone: string): Date {
+  const t = s.trim();
+  if (ISO_DATE_ONLY.test(t)) return startOfYmdInZone(t, timeZone);
+  return new Date(s);
+}
+
+/** Exclusive end: first instant after the last included calendar day (date-only). */
+function parseCalendarRangeEndExclusive(s: string, timeZone: string): Date {
+  const t = s.trim();
+  if (ISO_DATE_ONLY.test(t)) return startOfYmdInZone(gregorianYmdPlusOne(t), timeZone);
+  return new Date(s);
+}
 
 function getConfig() {
   const username = process.env.CALDAV_USERNAME;
@@ -82,6 +150,10 @@ async function fetchEvents(
     );
   }
 
+  const padMs = 24 * 60 * 60 * 1000;
+  const queryStart = new Date(start.getTime() - padMs);
+  const queryEnd = new Date(end.getTime() + padMs);
+
   const client = await createDAVClient({
     serverUrl: config.serverUrl,
     credentials: {
@@ -96,12 +168,24 @@ async function fetchEvents(
   const allEvents: ParsedEvent[] = [];
 
   for (const cal of calendars) {
-    const objects = await client.fetchCalendarObjects({
+    const baseOpts = {
       calendar: cal,
-      timeRange: { start: start.toISOString(), end: end.toISOString() },
-      useMultiGet: false,
+      timeRange: { start: queryStart.toISOString(), end: queryEnd.toISOString() },
+      useMultiGet: false as const,
       urlFilter: () => true, // iCloud may use URLs without .ics suffix
-    });
+    };
+    let objects;
+    try {
+      objects = await client.fetchCalendarObjects({
+        ...baseOpts,
+        expand: true,
+      });
+    } catch {
+      objects = await client.fetchCalendarObjects({
+        ...baseOpts,
+        expand: false,
+      });
+    }
 
     for (const obj of objects) {
       const data = typeof obj.data === "string" ? obj.data : String(obj.data ?? "");
@@ -114,22 +198,31 @@ async function fetchEvents(
 
   allEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+  const inRange = allEvents.filter((e) => {
+    const t = new Date(e.start).getTime();
+    return t >= startMs && t < endMs;
+  });
+
   if (maxEvents !== undefined && maxEvents > 0) {
-    return allEvents.slice(0, maxEvents);
+    return inRange.slice(0, maxEvents);
   }
-  return allEvents;
+  return inRange;
 }
 
-function formatEvents(events: ParsedEvent[]): string {
+function formatEvents(events: ParsedEvent[], displayTimeZone: string): string {
   if (events.length === 0) return "No events found.";
 
+  const localeOpts = { timeZone: displayTimeZone } as const;
   const lines = events.map((e) => {
     const startDt = new Date(e.start);
     const endDt = new Date(e.end);
     const timeStr = e.isAllDay
       ? "All day"
-      : `${startDt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} - ${endDt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+      : `${startDt.toLocaleTimeString("en-US", { ...localeOpts, hour: "numeric", minute: "2-digit" })} - ${endDt.toLocaleTimeString("en-US", { ...localeOpts, hour: "numeric", minute: "2-digit" })}`;
     const dateStr = startDt.toLocaleDateString("en-US", {
+      ...localeOpts,
       weekday: "short",
       month: "short",
       day: "numeric",
@@ -160,18 +253,21 @@ export default function (pi: ExtensionAPI) {
       "get_calendar_events: Fetch events from Apple/CalDAV calendar for a date range",
     parameters: Type.Object({
       startDate: Type.String({
-        description: "Start date in ISO 8601 format (e.g. 2025-03-08)",
+        description:
+          "Start: ISO 8601 instant, or date-only YYYY-MM-DD (start of that day in CALDAV_TIMEZONE)",
       }),
       endDate: Type.String({
-        description: "End date in ISO 8601 format (e.g. 2025-03-15)",
+        description:
+          "End: ISO 8601 instant (exclusive when using half-open range), or date-only YYYY-MM-DD (exclusive end is start of the next calendar day in CALDAV_TIMEZONE)",
       }),
     }),
     async execute(_toolCallId, params) {
-      const start = new Date(params.startDate);
-      const end = new Date(params.endDate);
+      const tz = getConfig().timezone;
+      const start = parseCalendarRangeStart(params.startDate, tz);
+      const end = parseCalendarRangeEndExclusive(params.endDate, tz);
       const events = await fetchEvents(start, end);
       return {
-        content: [{ type: "text", text: formatEvents(events) }],
+        content: [{ type: "text", text: formatEvents(events, tz) }],
         details: { count: events.length },
       };
     },
@@ -186,11 +282,12 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute() {
       const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const tz = getConfig().timezone;
+      const start = startOfZonedCalendarDay(now, tz);
       const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
       const events = await fetchEvents(start, end);
       return {
-        content: [{ type: "text", text: formatEvents(events) }],
+        content: [{ type: "text", text: formatEvents(events, tz) }],
         details: { count: events.length },
       };
     },
@@ -216,8 +313,9 @@ export default function (pi: ExtensionAPI) {
       const now = new Date();
       const end = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // ~30 days
       const events = await fetchEvents(now, end, count);
+      const tz = getConfig().timezone;
       return {
-        content: [{ type: "text", text: formatEvents(events) }],
+        content: [{ type: "text", text: formatEvents(events, tz) }],
         details: { count: events.length },
       };
     },
