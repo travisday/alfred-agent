@@ -26,7 +26,7 @@ Deploy your own personal AI assistant on [Railway](https://railway.com) — acce
   └───────────┘
 ```
 
-Optional: With `DISCORD_BOT_TOKEN` set, a Discord bridge runs in the same container. DM the bot to talk to Alfred from Discord — same workspace, same session, no SSH needed.
+Optional: With `DISCORD_BOT_TOKEN` set, a Discord bridge runs in the same container. DM the bot to talk to Alfred from Discord — same workspace, same session, no SSH needed. With `PROACTIVE_ENABLED=1` (and a recipient user ID plus an LLM key), a scheduler can run up to three daily check-ins and DM you summaries.
 
 - **Pi agent** runs on-demand — state lives in markdown files on a persistent volume
 - **LLM inference** is handled by your chosen provider's API (no GPU needed on the server)
@@ -91,6 +91,23 @@ Discord commands:
 
 Background tasks are explicit-first (`/task`), with optional automatic fallback for obviously long-running requests.
 
+#### Proactive check-ins (optional)
+
+Set `PROACTIVE_ENABLED=1` to run three daily check-ins (default **8:00, 12:00, 18:00** in `America/Los_Angeles`). A background script invokes `pi -p` with **thin** prompts from `/opt/proactive/prompts/` (morning, midday, evening)—each slot only adds an agenda; main behavior and context still come from `.pi/SYSTEM.md`, `/alfred/AGENTS.md`, and `/alfred/memory/`. Alfred uses the **`send_discord_message`** tool (discord-notify extension) to DM you a summary via the **same** `DISCORD_BOT_TOKEN` as the bridge (HTTP REST only — no second Gateway connection).
+
+**With `PROACTIVE_ENABLED=1` you need:** `DISCORD_BOT_TOKEN`, a recipient user ID (`DISCORD_PROACTIVE_USER_ID` or `DISCORD_OWNER_USER_ID`), and at least one LLM API key. The user must have **DMed the bot at least once** so Discord allows outbound DMs to that user.
+
+| Variable | Description |
+|----------|-------------|
+| `PROACTIVE_ENABLED` | Set to `1` to start the proactive scheduler |
+| `PROACTIVE_SCHEDULE` | Three comma-separated local times: morning, midday, evening (default `8:00,12:00,18:00`) |
+| `PROACTIVE_MODEL` | Model passed to `pi -p` (default `groq:qwen-qwq-32b`) |
+| `PROACTIVE_TZ` | IANA timezone for scheduling (default `America/Los_Angeles`) |
+| `PROACTIVE_POLL_SECS` | How often to check the clock in seconds (default `300`) |
+| `DISCORD_PROACTIVE_USER_ID` | Optional; if unset, `DISCORD_OWNER_USER_ID` is used as the DM recipient |
+
+Scheduler state and logs live under `/alfred/state/` (e.g. `proactive-slots.state`, `proactive-morning.log`).
+
 ### 4. Web Search (optional — Tavily)
 
 To give Alfred live web search with source-backed results, set:
@@ -143,6 +160,12 @@ Set these in your Railway service settings:
 | `DISCORD_DM_POLICY` | No | DM access policy: `open`, `owner_only`, or `allowlist` (default: `open`) |
 | `DISCORD_OWNER_USER_ID` | No | Required when `DISCORD_DM_POLICY=owner_only` |
 | `DISCORD_ALLOWED_USER_IDS` | No | Comma-separated Discord user IDs for `allowlist` mode |
+| `DISCORD_PROACTIVE_USER_ID` | No | DM recipient for proactive check-ins; defaults to `DISCORD_OWNER_USER_ID` |
+| `PROACTIVE_ENABLED` | No | Set to `1` to enable scheduled morning/midday/evening check-ins |
+| `PROACTIVE_SCHEDULE` | No | Three comma-separated times (default `8:00,12:00,18:00` local `PROACTIVE_TZ`) |
+| `PROACTIVE_MODEL` | No | Model for proactive `pi -p` runs (default `groq:qwen-qwq-32b`) |
+| `PROACTIVE_TZ` | No | IANA timezone for proactive scheduler (default `America/Los_Angeles`) |
+| `PROACTIVE_POLL_SECS` | No | Poll interval in seconds (default `300`) |
 | `TASK_WEBHOOK_SECRET` | Optional | Secret for signing task completion webhooks (enables \"your task is done\" notifications in Discord) |
 | `TASK_WEBHOOK_PORT` | No | Port for the internal webhook HTTP server (default: 8080) |
 | `TASK_WEBHOOK_BASE_URL` | No | Internal callback base URL for background workers (default: `http://127.0.0.1:$TASK_WEBHOOK_PORT`) |
@@ -253,7 +276,7 @@ If you want to customize it, edit `.pi/SYSTEM.md` in this repo and redeploy:
         └── package.json
 ```
 
-> **How it works:** Pi looks for `.pi/SYSTEM.md` in the working directory and uses it as the system prompt instead of its built-in default. The Dockerfile stages `.pi/` into the image, and `start.sh` copies it into `/alfred/.pi/` on every boot — so it's always available in the volume where you land via SSH. The CalDAV extension is auto-discovered from `.pi/extensions/` and registers `get_today_events`, `get_calendar_events`, and `get_upcoming` when `CALDAV_USERNAME` and `CALDAV_APP_PASSWORD` are set.
+> **How it works:** Pi looks for `.pi/SYSTEM.md` in the working directory and uses it as the system prompt instead of its built-in default. The Dockerfile stages `.pi/` into the image, and `start.sh` copies it into `/alfred/.pi/` on every boot — so it's always available in the volume where you land via SSH. Extensions under `.pi/extensions/` are auto-discovered (for example CalDAV calendar tools when CalDAV credentials are set; `web_search` when `TAVILY_API_KEY` is set; **`send_discord_message`** from `discord-notify` when `DISCORD_BOT_TOKEN` and a recipient user ID are available for proactive check-ins).
 
 ---
 

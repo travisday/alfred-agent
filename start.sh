@@ -95,6 +95,23 @@ if [ -n "$DISCORD_BOT_TOKEN" ] && [ -d /opt/discord-bridge ]; then
   echo "Discord bridge started"
 fi
 
+# --- Proactive check-ins (optional) ---
+PROACTIVE_RECIPIENT="${DISCORD_PROACTIVE_USER_ID:-${DISCORD_OWNER_USER_ID:-}}"
+HAS_LLM_KEY=false
+if [ -n "${GROQ_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${GEMINI_API_KEY:-}" ]; then
+  HAS_LLM_KEY=true
+fi
+if [ "${PROACTIVE_ENABLED:-}" = "1" ] && [ -n "${DISCORD_BOT_TOKEN:-}" ] && [ -n "$PROACTIVE_RECIPIENT" ] && [ "$HAS_LLM_KEY" = true ]; then
+  if [ -x /opt/proactive/scheduler.sh ]; then
+    /opt/proactive/scheduler.sh &
+    echo "Proactive check-ins scheduler started (TZ=${PROACTIVE_TZ:-America/Los_Angeles})"
+  else
+    echo "WARNING: PROACTIVE_ENABLED but /opt/proactive/scheduler.sh missing or not executable"
+  fi
+elif [ "${PROACTIVE_ENABLED:-}" = "1" ]; then
+  echo "WARNING: PROACTIVE_ENABLED but proactive scheduler not started (need DISCORD_BOT_TOKEN, DISCORD_PROACTIVE_USER_ID or DISCORD_OWNER_USER_ID, and at least one LLM API key)"
+fi
+
 if [ -n "$TAVILY_API_KEY" ]; then
   echo "Tavily web search enabled"
 fi
@@ -104,6 +121,9 @@ echo " Alfred is online."
 echo " Connect via: ssh alfred"
 if [ -n "$DISCORD_BOT_TOKEN" ]; then
   echo " Discord: DM the bot to talk to Alfred"
+fi
+if [ "${PROACTIVE_ENABLED:-}" = "1" ] && [ -n "${DISCORD_BOT_TOKEN:-}" ] && [ -n "$PROACTIVE_RECIPIENT" ] && [ "$HAS_LLM_KEY" = true ]; then
+  echo " Proactive: scheduled check-ins enabled"
 fi
 echo "==============================="
 
