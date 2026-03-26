@@ -101,12 +101,22 @@ Set `PROACTIVE_ENABLED=1` to run three daily check-ins (default **8:00, 12:00, 1
 |----------|-------------|
 | `PROACTIVE_ENABLED` | Set to `1` to start the proactive scheduler |
 | `PROACTIVE_SCHEDULE` | Three comma-separated local times: morning, midday, evening (default `8:00,12:00,18:00`) |
-| `PROACTIVE_MODEL` | Model passed to `pi -p` (default `groq:gpt-oss-20b`) |
+| `PROACTIVE_MODEL` | Model passed to `pi -p` (default `groq/openai/gpt-oss-20b`; use **slashes** `provider/model`, not `provider:model`, when the model id contains `/`; run `pi --list-models`) |
 | `PROACTIVE_TZ` | IANA timezone for scheduling (default `America/Los_Angeles`) |
 | `PROACTIVE_POLL_SECS` | How often to check the clock in seconds (default `300`) |
 | `DISCORD_PROACTIVE_USER_ID` | Optional; if unset, `DISCORD_OWNER_USER_ID` is used as the DM recipient |
 
 Scheduler state and logs live under `/alfred/state/` (e.g. `proactive-slots.state`, `proactive-morning.log`).
+
+**Manual test (recommended):** After SSH, either open a **new** shell so `/root/.bashrc` loads Railway env, or run `source /etc/profile.d/railway-env.sh`. Verify `echo -n "$DISCORD_BOT_TOKEN" | wc -c` is non-zero and `DISCORD_OWNER_USER_ID` or `DISCORD_PROACTIVE_USER_ID` is set. Then run:
+
+```bash
+/opt/proactive/run-checkin.sh morning
+```
+
+That sources the same env the container had at boot (so `send_discord_message` can authenticate). If you only run raw `pi -p ...` without loading env, Discord tools will fail silently unless the model pastes the text in chat.
+
+**No DM but the run “succeeded”:** (1) Env missing in your SSH session — use `run-checkin.sh` or `source /etc/profile.d/railway-env.sh`. (2) You never opened a DM channel with the bot — DM the bot once. (3) Wrong recipient user ID. (4) Check `pi` output for `discord-notify` or `Discord send failed` lines; failures are also logged to stderr.
 
 ### 4. Web Search (optional — Tavily)
 
@@ -163,7 +173,7 @@ Set these in your Railway service settings:
 | `DISCORD_PROACTIVE_USER_ID` | No | DM recipient for proactive check-ins; defaults to `DISCORD_OWNER_USER_ID` |
 | `PROACTIVE_ENABLED` | No | Set to `1` to enable scheduled morning/midday/evening check-ins |
 | `PROACTIVE_SCHEDULE` | No | Three comma-separated times (default `8:00,12:00,18:00` local `PROACTIVE_TZ`) |
-| `PROACTIVE_MODEL` | No | Model for proactive `pi -p` runs (default `groq:gpt-oss-20b`) |
+| `PROACTIVE_MODEL` | No | Model for proactive `pi -p` runs (default `groq/openai/gpt-oss-20b`) |
 | `PROACTIVE_TZ` | No | IANA timezone for proactive scheduler (default `America/Los_Angeles`) |
 | `PROACTIVE_POLL_SECS` | No | Poll interval in seconds (default `300`) |
 | `TASK_WEBHOOK_SECRET` | Optional | Secret for signing task completion webhooks (enables \"your task is done\" notifications in Discord) |

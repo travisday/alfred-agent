@@ -85,6 +85,15 @@ fi
 } > /etc/profile.d/railway-env.sh 2>/dev/null || true
 chmod 644 /etc/profile.d/railway-env.sh
 
+# Ensure interactive SSH shells load Railway env (Discord token, recipient IDs, etc.) for manual `pi` runs.
+ALFRED_ENV_MARKER="# alfred: source railway-env"
+for f in /root/.bashrc /root/.profile; do
+  touch "$f"
+  if ! grep -qF "$ALFRED_ENV_MARKER" "$f" 2>/dev/null; then
+    printf '\n%s\n[ -f /etc/profile.d/railway-env.sh ] && . /etc/profile.d/railway-env.sh\n' "$ALFRED_ENV_MARKER" >>"$f"
+  fi
+done
+
 # --- SSH ---
 echo "root:${SSH_PASSWORD:-changeme}" | chpasswd
 /usr/sbin/sshd

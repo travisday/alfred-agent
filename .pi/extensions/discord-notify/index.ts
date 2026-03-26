@@ -111,13 +111,11 @@ export default function (pi: ExtensionAPI) {
       const t = getBotToken();
       const r = getRecipientId();
       if (!t || !r) {
+        const msg =
+          "discord-notify is not configured: missing DISCORD_BOT_TOKEN or DISCORD_PROACTIVE_USER_ID / DISCORD_OWNER_USER_ID.";
+        console.error(`[discord-notify] ${msg}`);
         return {
-          content: [
-            {
-              type: "text",
-              text: "discord-notify is not configured: missing DISCORD_BOT_TOKEN or recipient user ID.",
-            },
-          ],
+          content: [{ type: "text", text: msg }],
           details: { ok: false },
         };
       }
@@ -144,6 +142,7 @@ export default function (pi: ExtensionAPI) {
         };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[discord-notify] Discord send failed: ${msg}`);
         return {
           content: [{ type: "text", text: `Discord send failed: ${msg}` }],
           details: { ok: false },
