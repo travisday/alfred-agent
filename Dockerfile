@@ -32,7 +32,7 @@ RUN cd /opt/alfred-pi-config/extensions/discord-notify && npm install
 
 # Proactive check-in prompts + scheduler (read-only path; not hidden by /alfred volume)
 COPY proactive/ /opt/proactive/
-RUN chmod +x /opt/proactive/scheduler.sh /opt/proactive/run-checkin.sh
+RUN chmod +x /opt/proactive/scheduler.sh /opt/proactive/run-checkin.sh /opt/proactive/test-discord-dm.sh
 
 # Discord bridge
 COPY discord-bridge/ /opt/discord-bridge/

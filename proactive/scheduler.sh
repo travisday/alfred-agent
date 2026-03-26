@@ -66,6 +66,7 @@ run_checkin() {
     cd /alfred || exit 1
     pi -p --no-session \
       --model "${PROACTIVE_MODEL:-groq/openai/gpt-oss-20b}" \
+      --append-system-prompt "/opt/proactive/append-discord-mandatory.md" \
       "@${prompt}" 2>&1
   ) | tee -a "$logfile"
   # PIPESTATUS[0] is the pi subshell exit; tee is [1]

@@ -104,19 +104,41 @@ Set `PROACTIVE_ENABLED=1` to run three daily check-ins (default **8:00, 12:00, 1
 | `PROACTIVE_MODEL` | Model passed to `pi -p` (default `groq/openai/gpt-oss-20b`; use **slashes** `provider/model`, not `provider:model`, when the model id contains `/`; run `pi --list-models`) |
 | `PROACTIVE_TZ` | IANA timezone for scheduling (default `America/Los_Angeles`) |
 | `PROACTIVE_POLL_SECS` | How often to check the clock in seconds (default `300`) |
+| `PROACTIVE_VERIFY` | Set to `1` for manual `/opt/proactive/run-checkin.sh` runs to require JSON proof that `send_discord_message` succeeded (same as `--verify` flag) |
 | `DISCORD_PROACTIVE_USER_ID` | Optional; if unset, `DISCORD_OWNER_USER_ID` is used as the DM recipient |
 
 Scheduler state and logs live under `/alfred/state/` (e.g. `proactive-slots.state`, `proactive-morning.log`).
 
-**Manual test (recommended):** After SSH, either open a **new** shell so `/root/.bashrc` loads Railway env, or run `source /etc/profile.d/railway-env.sh`. Verify `echo -n "$DISCORD_BOT_TOKEN" | wc -c` is non-zero and `DISCORD_OWNER_USER_ID` or `DISCORD_PROACTIVE_USER_ID` is set. Then run:
+##### Testing proactive (Discord + Pi)
 
-```bash
-/opt/proactive/run-checkin.sh morning
-```
+Always load Railway env in SSH (`source /etc/profile.d/railway-env.sh`) or use a **new** login shell so `/root/.bashrc` runs — otherwise `DISCORD_BOT_TOKEN` may be unset.
 
-That sources the same env the container had at boot (so `send_discord_message` can authenticate). If you only run raw `pi -p ...` without loading env, Discord tools will fail silently unless the model pastes the text in chat.
+1. **Discord-only smoke test (no LLM)** — proves token + recipient + “you DM’d the bot”:
 
-**No DM but the run “succeeded”:** (1) Env missing in your SSH session — use `run-checkin.sh` or `source /etc/profile.d/railway-env.sh`. (2) You never opened a DM channel with the bot — DM the bot once. (3) Wrong recipient user ID. (4) Check `pi` output for `discord-notify` or `Discord send failed` lines; failures are also logged to stderr.
+   ```bash
+   /opt/proactive/test-discord-dm.sh
+   ```
+
+   You should receive a short test DM. If this fails, fix env or Discord before debugging Pi.
+
+2. **Full check-in (Pi + tools)** — same as the scheduler uses:
+
+   ```bash
+   /opt/proactive/run-checkin.sh morning
+   ```
+
+   `pi -p` in **text** mode only prints the model’s **final assistant text**, not tool traces — you can see a long reply in the terminal and still get **no DM** if the model skipped `send_discord_message`.
+
+3. **Verify the model actually called `send_discord_message`** — runs Pi with `--mode json` and **exits 1** unless the stream contains the extension’s success text (`Sent Discord DM`):
+
+   ```bash
+   /opt/proactive/run-checkin.sh morning --verify
+   # or: PROACTIVE_VERIFY=1 /opt/proactive/run-checkin.sh morning
+   ```
+
+4. **Scheduled runs** — tail `/alfred/state/proactive-morning.log` (etc.) after a trigger; shorten the wait with `PROACTIVE_SCHEDULE` + `PROACTIVE_POLL_SECS` while testing.
+
+**No DM but the run “succeeded”:** (1) Env missing — `run-checkin.sh` sources env; don’t run raw `pi` without it. (2) Never DM’d the bot — DM it once. (3) Wrong user ID. (4) stderr lines `[discord-notify]` / `Discord send failed`. (5) Model skipped the tool — use **`--verify`**; ensure `--append-system-prompt /opt/proactive/append-discord-mandatory.md` is present (default in `run-checkin.sh` / scheduler).
 
 ### 4. Web Search (optional — Tavily)
 
@@ -176,6 +198,7 @@ Set these in your Railway service settings:
 | `PROACTIVE_MODEL` | No | Model for proactive `pi -p` runs (default `groq/openai/gpt-oss-20b`) |
 | `PROACTIVE_TZ` | No | IANA timezone for proactive scheduler (default `America/Los_Angeles`) |
 | `PROACTIVE_POLL_SECS` | No | Poll interval in seconds (default `300`) |
+| `PROACTIVE_VERIFY` | No | Manual testing: `1` with `run-checkin.sh` = exit 1 unless Pi JSON output shows a successful `send_discord_message` |
 | `TASK_WEBHOOK_SECRET` | Optional | Secret for signing task completion webhooks (enables \"your task is done\" notifications in Discord) |
 | `TASK_WEBHOOK_PORT` | No | Port for the internal webhook HTTP server (default: 8080) |
 | `TASK_WEBHOOK_BASE_URL` | No | Internal callback base URL for background workers (default: `http://127.0.0.1:$TASK_WEBHOOK_PORT`) |

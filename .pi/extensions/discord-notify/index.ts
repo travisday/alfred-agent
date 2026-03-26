@@ -100,7 +100,7 @@ export default function (pi: ExtensionAPI) {
     name: "send_discord_message",
     label: "Send Discord DM",
     description:
-      "Send a direct message to the configured user via the Alfred Discord bot. Use for check-in summaries and notifications.",
+      "REQUIRED for proactive check-ins: send the full summary as a DM to the user via the Alfred Discord bot. The user does not read check-ins from the terminal—Discord is the inbox. Call this with the complete message (bullets OK).",
     promptSnippet: "send_discord_message: Send a DM to the owner via Discord",
     parameters: Type.Object({
       message: Type.String({
