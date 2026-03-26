@@ -46,6 +46,8 @@ if [ -z "${DISCORD_BOT_TOKEN:-}" ] || { [ -z "${DISCORD_PROACTIVE_USER_ID:-}" ] 
 fi
 
 APPEND="/opt/proactive/append-discord-mandatory.md"
+# Groq openai/gpt-oss-* can emit Harmony-style channel tokens into tool names when thinking is on (e.g. read<|channel|>commentary).
+THINKING="${PROACTIVE_THINKING:-off}"
 
 cd /alfred
 
@@ -54,6 +56,7 @@ if [ "$VERIFY" = true ]; then
   trap 'rm -f "$TMP"' EXIT
   set +e
   pi -p --no-session --mode json \
+    --thinking "$THINKING" \
     --model "${PROACTIVE_MODEL:-groq/openai/gpt-oss-20b}" \
     --append-system-prompt "$APPEND" \
     "@${PROMPT}" 2>&1 | tee "$TMP"
@@ -72,6 +75,7 @@ if [ "$VERIFY" = true ]; then
 fi
 
 exec pi -p --no-session \
+  --thinking "$THINKING" \
   --model "${PROACTIVE_MODEL:-groq/openai/gpt-oss-20b}" \
   --append-system-prompt "$APPEND" \
   "@${PROMPT}"

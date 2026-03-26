@@ -102,6 +102,7 @@ Set `PROACTIVE_ENABLED=1` to run three daily check-ins (default **8:00, 12:00, 1
 | `PROACTIVE_ENABLED` | Set to `1` to start the proactive scheduler |
 | `PROACTIVE_SCHEDULE` | Three comma-separated local times: morning, midday, evening (default `8:00,12:00,18:00`) |
 | `PROACTIVE_MODEL` | Model passed to `pi -p` (default `groq/openai/gpt-oss-20b`; use **slashes** `provider/model`, not `provider:model`, when the model id contains `/`; run `pi --list-models`) |
+| `PROACTIVE_THINKING` | Pi `--thinking` level for proactive runs (default **`off`**). Groq **`openai/gpt-oss-*`** with thinking enabled can emit invalid tool names (e.g. `read<|channel|>commentary`); keep `off` unless you know you need higher. |
 | `PROACTIVE_TZ` | IANA timezone for scheduling (default `America/Los_Angeles`) |
 | `PROACTIVE_POLL_SECS` | How often to check the clock in seconds (default `300`) |
 | `PROACTIVE_VERIFY` | Set to `1` for manual `/opt/proactive/run-checkin.sh` runs to require JSON proof that `send_discord_message` succeeded (same as `--verify` flag) |
@@ -139,6 +140,8 @@ Always load Railway env in SSH (`source /etc/profile.d/railway-env.sh`) or use a
 4. **Scheduled runs** — tail `/alfred/state/proactive-morning.log` (etc.) after a trigger; shorten the wait with `PROACTIVE_SCHEDULE` + `PROACTIVE_POLL_SECS` while testing.
 
 **No DM but the run “succeeded”:** (1) Env missing — `run-checkin.sh` sources env; don’t run raw `pi` without it. (2) Never DM’d the bot — DM it once. (3) Wrong user ID. (4) stderr lines `[discord-notify]` / `Discord send failed`. (5) Model skipped the tool — use **`--verify`**; ensure `--append-system-prompt /opt/proactive/append-discord-mandatory.md` is present (default in `run-checkin.sh` / scheduler).
+
+**`Tool call validation failed` / `read<|channel|>commentary`:** Groq **`openai/gpt-oss-*`** models can corrupt tool names when Pi’s thinking mode is on. Proactive runs default to **`PROACTIVE_THINKING=off`** (`--thinking off`). If you overrode thinking, unset it or set `PROACTIVE_THINKING=off`. Alternatively set `PROACTIVE_MODEL` to a non–reasoning Groq model (e.g. `groq/llama-3.3-70b-versatile`).
 
 ### 4. Web Search (optional — Tavily)
 
@@ -196,6 +199,7 @@ Set these in your Railway service settings:
 | `PROACTIVE_ENABLED` | No | Set to `1` to enable scheduled morning/midday/evening check-ins |
 | `PROACTIVE_SCHEDULE` | No | Three comma-separated times (default `8:00,12:00,18:00` local `PROACTIVE_TZ`) |
 | `PROACTIVE_MODEL` | No | Model for proactive `pi -p` runs (default `groq/openai/gpt-oss-20b`) |
+| `PROACTIVE_THINKING` | No | Pi thinking level for proactive runs (default `off`; avoids gpt-oss tool-name bugs on Groq) |
 | `PROACTIVE_TZ` | No | IANA timezone for proactive scheduler (default `America/Los_Angeles`) |
 | `PROACTIVE_POLL_SECS` | No | Poll interval in seconds (default `300`) |
 | `PROACTIVE_VERIFY` | No | Manual testing: `1` with `run-checkin.sh` = exit 1 unless Pi JSON output shows a successful `send_discord_message` |

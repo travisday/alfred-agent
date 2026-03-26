@@ -12,6 +12,8 @@ export TZ
 SCHEDULE="${PROACTIVE_SCHEDULE:-8:00,12:00,18:00}"
 SLOT_NAMES=(morning midday evening)
 POLL_SECS="${PROACTIVE_POLL_SECS:-300}"
+# See run-checkin.sh: gpt-oss + thinking can break tool names on Groq.
+THINKING="${PROACTIVE_THINKING:-off}"
 LOG_PREFIX="[proactive]"
 
 log() {
@@ -65,6 +67,7 @@ run_checkin() {
   (
     cd /alfred || exit 1
     pi -p --no-session \
+      --thinking "$THINKING" \
       --model "${PROACTIVE_MODEL:-groq/openai/gpt-oss-20b}" \
       --append-system-prompt "/opt/proactive/append-discord-mandatory.md" \
       "@${prompt}" 2>&1
