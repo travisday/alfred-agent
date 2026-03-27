@@ -4,10 +4,12 @@
 
 set -u
 
+PROACTIVE_ROOT="${PROACTIVE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+
 STATE_DIR="${PROACTIVE_STATE_DIR:-/alfred/state}"
 STATE_FILE="${STATE_DIR}/proactive-slots.state"
 LOCK_FILE="${STATE_DIR}/proactive.lock"
-TZ="${PROACTIVE_TZ:-America/Los_Angeles}"
+TZ="${PROACTIVE_TZ:-${TIMEZONE:-America/Los_Angeles}}"
 export TZ
 SCHEDULE="${PROACTIVE_SCHEDULE:-8:00,12:00,18:00}"
 SLOT_NAMES=(morning midday evening)
@@ -57,7 +59,7 @@ time_to_minutes() {
 
 run_checkin() {
   local name="$1"
-  local prompt="/opt/proactive/prompts/${name}.md"
+  local prompt="${PROACTIVE_ROOT}/prompts/${name}.md"
   if [ ! -f "$prompt" ]; then
     log "ERROR: missing prompt file: $prompt"
     return 1
@@ -69,7 +71,7 @@ run_checkin() {
     pi -p --no-session \
       --thinking "$THINKING" \
       --model "${PROACTIVE_MODEL:-groq/openai/gpt-oss-20b}" \
-      --append-system-prompt "/opt/proactive/append-discord-mandatory.md" \
+      --append-system-prompt "${PROACTIVE_ROOT}/append-discord-mandatory.md" \
       "@${prompt}" 2>&1
   ) | tee -a "$logfile"
   # PIPESTATUS[0] is the pi subshell exit; tee is [1]

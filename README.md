@@ -35,9 +35,108 @@ Optional: With `DISCORD_BOT_TOKEN` set, a Discord bridge runs in the same contai
 
 ---
 
-## Required API Keys
+## Configuration
 
-You need two things to deploy Alfred. Both are set as **environment variables** in your Railway service.
+Alfred separates **secrets** (Railway env vars) from **preferences** (`/alfred/config.env` on the volume).
+
+### How it works
+
+On boot, `start.sh` reads `/alfred/config.env` — a simple `KEY=VALUE` file. Railway env vars **always override** config.env values, so you can still set anything in Railway when needed. On first boot, a default config.env is generated with all lines commented out (identical behavior to today).
+
+### Unified timezone
+
+Set `TIMEZONE` once and both the proactive scheduler and CalDAV calendar use it:
+
+```env
+TIMEZONE=America/New_York
+```
+
+The old per-subsystem vars (`PROACTIVE_TZ`, `CALDAV_TIMEZONE`) still work and override `TIMEZONE` for their subsystem if set.
+
+### Editing config.env
+
+SSH in and edit the file directly:
+
+```bash
+tailscale ssh root@alfred
+vi /alfred/config.env
+```
+
+Or via SSHFS (mount with `noappledouble` to prevent macOS `._*` resource fork files):
+
+```bash
+sshfs root@alfred:/alfred ~/alfred -o noappledouble
+```
+
+Changes take effect on the next container restart.
+
+### `/alfred/config.env` reference
+
+```env
+# /alfred/config.env — Alfred preferences
+# Railway env vars always override these values.
+# Uncomment and edit any line to customize.
+
+# --- Timezone (IANA) ---
+# TIMEZONE=America/Los_Angeles
+
+# --- Proactive check-ins ---
+# PROACTIVE_SCHEDULE=8:00,12:00,18:00
+# PROACTIVE_MODEL=groq/openai/gpt-oss-20b
+# PROACTIVE_THINKING=off
+# PROACTIVE_POLL_SECS=300
+
+# --- Discord ---
+# DISCORD_DM_POLICY=open
+# DISCORD_OWNER_USER_ID=
+# DISCORD_PROACTIVE_USER_ID=
+# DISCORD_ALLOWED_USER_IDS=
+# DISCORD_PROMPT_TIMEOUT_MS=300000
+# DISCORD_TASK_TIMEOUT_MS=1800000
+
+# --- Sub-agent ---
+# DELEGATE_TASK_TIMEOUT_MS=300000
+
+# --- CalDAV (Apple Calendar) ---
+# CALDAV_SERVER_URL=https://caldav.icloud.com
+# CALDAV_USERNAME=
+
+# --- Proactive root (set when you move prompts to the volume) ---
+# PROACTIVE_ROOT=/opt/proactive
+```
+
+### Rollback
+
+Delete `/alfred/config.env` → system reverts to pure env-var behavior. No code changes needed.
+
+---
+
+## Railway Environment Variables (Secrets & Infra)
+
+Only secrets and infrastructure toggles belong in Railway. Set these in your Railway service settings:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `TS_AUTHKEY` | **Yes** | Tailscale auth key for private network access |
+| `RAILWAY_RUN_UID` | **Yes** | Set to `0` — required for volumes to mount correctly |
+| `SSH_PASSWORD` | No | Root SSH password (default: `changeme`) |
+| `GROQ_API_KEY` | At least one | Groq API key |
+| `ANTHROPIC_API_KEY` | At least one | Anthropic API key |
+| `OPENAI_API_KEY` | At least one | OpenAI API key |
+| `GEMINI_API_KEY` | At least one | Google Gemini API key |
+| `DISCORD_BOT_TOKEN` | Optional | Discord bot token — enables DM bridge |
+| `CALDAV_APP_PASSWORD` | Optional | App-specific password for iCloud CalDAV |
+| `TAVILY_API_KEY` | Optional | Enables Tavily-backed `web_search` tool |
+| `TASK_WEBHOOK_SECRET` | Optional | Secret for signing task completion webhooks |
+| `PROACTIVE_ENABLED` | No | Set to `1` to enable scheduled check-ins (easy on/off toggle) |
+
+> You need **at least one** LLM API key. You can set multiple to switch between providers at runtime.
+>
+> All other preferences (timezone, schedule, Discord user IDs, timeouts, CalDAV server URL, etc.) go in `/alfred/config.env` on the volume. See [Configuration](#configuration) above.
+
+---
+
+## Setup
 
 ### 1. Tailscale Auth Key (`TS_AUTHKEY`)
 
@@ -52,27 +151,37 @@ Used to connect the Railway container to your private Tailscale network so you c
    - **Expiration**: Set to your preference (you'll need to regenerate when it expires)
 5. Copy the key — this becomes your `TS_AUTHKEY` env var
 
-### 2. CalDAV (optional — Apple Calendar)
+### 2. LLM Provider API Key
 
-To enable Alfred to read your Apple Calendar, set:
+Alfred uses the [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) under the hood, which supports multiple LLM providers. You need an API key for at least one.
 
-| Variable | Description |
-|----------|-------------|
-| `CALDAV_USERNAME` | Your Apple ID (e.g. `you@icloud.com`) |
-| `CALDAV_APP_PASSWORD` | [App-specific password](https://support.apple.com/en-us/HT204397) (required for iCloud) |
+The `start.sh` script automatically detects whichever API keys you set and configures Pi accordingly. You can set one or multiple — just add the env var(s) for your preferred provider(s):
 
-Optional:
+| Provider | Env Variable | Get a Key |
+|----------|-------------|-----------|
+| Groq | `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) |
+| Anthropic | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
+| OpenAI | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
+| Google Gemini | `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) |
 
-| Variable | Description |
-|----------|-------------|
-| `CALDAV_SERVER_URL` | Default: `https://caldav.icloud.com` |
-| `CALDAV_TIMEZONE` | IANA timezone (e.g. `America/Los_Angeles`) for displayed times, “today” in `get_today_events`, and date-only range strings in `get_calendar_events`. Default: `America/Los_Angeles` |
+> **Tip:** You can set multiple provider keys at once. The startup script builds `auth.json` with all detected providers, so you can switch between models at runtime using Pi's `/model` command.
 
-When configured, Alfred can use `get_today_events`, `get_calendar_events`, and `get_upcoming` to read your schedule. Only calendars synced to this Apple ID over iCloud are available (not local-only “On My Mac” calendars).
+### 3. CalDAV (optional — Apple Calendar)
 
-### 3. Discord (optional)
+Set `CALDAV_APP_PASSWORD` in Railway. Put the non-secret settings in `/alfred/config.env`:
 
-To talk to Alfred via Discord DMs, set `DISCORD_BOT_TOKEN`:
+```env
+CALDAV_USERNAME=you@icloud.com
+CALDAV_SERVER_URL=https://caldav.icloud.com
+```
+
+The calendar extension uses `TIMEZONE` for display times and date interpretation (see [Configuration](#configuration)). You can override with `CALDAV_TIMEZONE` if the calendar needs a different zone.
+
+When configured, Alfred can use `get_today_events`, `get_calendar_events`, and `get_upcoming` to read your schedule. Only calendars synced to this Apple ID over iCloud are available (not local-only "On My Mac" calendars).
+
+### 4. Discord (optional)
+
+To talk to Alfred via Discord DMs, set `DISCORD_BOT_TOKEN` in Railway:
 
 1. Create an application at [Discord Developer Portal](https://discord.com/developers/applications)
 2. Go to **Bot** → **Add Bot** → copy the token
@@ -91,22 +200,22 @@ Discord commands:
 
 Background tasks are explicit-first (`/task`), with optional automatic fallback for obviously long-running requests.
 
+Discord preferences (DM policy, user IDs, timeouts) go in `/alfred/config.env` — see [Configuration](#configuration).
+
 #### Proactive check-ins (optional)
 
-Set `PROACTIVE_ENABLED=1` to run three daily check-ins (default **8:00, 12:00, 18:00** in `America/Los_Angeles`). A background script invokes `pi -p` with **thin** prompts from `/opt/proactive/prompts/` (morning, midday, evening)—each slot only adds an agenda; main behavior and context still come from `.pi/SYSTEM.md`, `/alfred/AGENTS.md`, and `/alfred/memory/`. Alfred uses the **`send_discord_message`** tool (discord-notify extension) to DM you a summary via the **same** `DISCORD_BOT_TOKEN` as the bridge (HTTP REST only — no second Gateway connection).
+Set `PROACTIVE_ENABLED=1` in Railway to run three daily check-ins (default **8:00, 12:00, 18:00** in your `TIMEZONE`). A background script invokes `pi -p` with **thin** prompts from **`/alfred/proactive/prompts/`** (morning, midday, evening)—each slot only adds an agenda; main behavior and context still come from `.pi/SYSTEM.md`, `/alfred/AGENTS.md`, and `/alfred/memory/`. Prompts are seeded on first boot and live on the volume so you can edit them without redeploying. Alfred uses the **`send_discord_message`** tool (discord-notify extension) to DM you a summary via the **same** `DISCORD_BOT_TOKEN` as the bridge (HTTP REST only — no second Gateway connection).
 
-**With `PROACTIVE_ENABLED=1` you need:** `DISCORD_BOT_TOKEN`, a recipient user ID (`DISCORD_PROACTIVE_USER_ID` or `DISCORD_OWNER_USER_ID`), and at least one LLM API key. The user must have **DMed the bot at least once** so Discord allows outbound DMs to that user.
+**With `PROACTIVE_ENABLED=1` you need:** `DISCORD_BOT_TOKEN`, a recipient user ID (`DISCORD_PROACTIVE_USER_ID` or `DISCORD_OWNER_USER_ID` in config.env), and at least one LLM API key. The user must have **DMed the bot at least once** so Discord allows outbound DMs to that user.
 
-| Variable | Description |
-|----------|-------------|
-| `PROACTIVE_ENABLED` | Set to `1` to start the proactive scheduler |
-| `PROACTIVE_SCHEDULE` | Three comma-separated local times: morning, midday, evening (default `8:00,12:00,18:00`) |
-| `PROACTIVE_MODEL` | Model passed to `pi -p` (default `groq/openai/gpt-oss-20b`; use **slashes** `provider/model`, not `provider:model`, when the model id contains `/`; run `pi --list-models`) |
-| `PROACTIVE_THINKING` | Pi `--thinking` level for proactive runs (default **`off`**). Groq **`openai/gpt-oss-*`** with thinking enabled can emit invalid tool names (e.g. `read<|channel|>commentary`); keep `off` unless you know you need higher. |
-| `PROACTIVE_TZ` | IANA timezone for scheduling (default `America/Los_Angeles`) |
-| `PROACTIVE_POLL_SECS` | How often to check the clock in seconds (default `300`) |
-| `PROACTIVE_VERIFY` | Set to `1` for manual `/opt/proactive/run-checkin.sh` runs to require JSON proof that `send_discord_message` succeeded (same as `--verify` flag) |
-| `DISCORD_PROACTIVE_USER_ID` | Optional; if unset, `DISCORD_OWNER_USER_ID` is used as the DM recipient |
+Proactive preferences (`PROACTIVE_SCHEDULE`, `PROACTIVE_MODEL`, `PROACTIVE_THINKING`, `PROACTIVE_POLL_SECS`) all go in `/alfred/config.env`. `PROACTIVE_ENABLED` stays in Railway as an easy on/off toggle.
+
+| Variable | Where | Description |
+|----------|-------|-------------|
+| `PROACTIVE_ENABLED` | Railway | Set to `1` to start the proactive scheduler |
+| `PROACTIVE_VERIFY` | Railway / env | Manual testing: `1` with `run-checkin.sh` = exit 1 unless `send_discord_message` succeeded |
+| All other `PROACTIVE_*` | config.env | Schedule, model, thinking, poll interval, root directory |
+| `DISCORD_PROACTIVE_USER_ID` | config.env | DM recipient; defaults to `DISCORD_OWNER_USER_ID` |
 
 Scheduler state and logs live under `/alfred/state/` (e.g. `proactive-slots.state`, `proactive-morning.log`).
 
@@ -114,10 +223,10 @@ Scheduler state and logs live under `/alfred/state/` (e.g. `proactive-slots.stat
 
 Always load Railway env in SSH (`source /etc/profile.d/railway-env.sh`) or use a **new** login shell so `/root/.bashrc` runs — otherwise `DISCORD_BOT_TOKEN` may be unset.
 
-1. **Discord-only smoke test (no LLM)** — proves token + recipient + “you DM’d the bot”:
+1. **Discord-only smoke test (no LLM)** — proves token + recipient + "you DM'd the bot":
 
    ```bash
-   /opt/proactive/test-discord-dm.sh
+   "${PROACTIVE_ROOT:-/opt/proactive}/test-discord-dm.sh"
    ```
 
    You should receive a short test DM. If this fails, fix env or Discord before debugging Pi.
@@ -125,91 +234,29 @@ Always load Railway env in SSH (`source /etc/profile.d/railway-env.sh`) or use a
 2. **Full check-in (Pi + tools)** — same as the scheduler uses:
 
    ```bash
-   /opt/proactive/run-checkin.sh morning
+   "${PROACTIVE_ROOT:-/opt/proactive}/run-checkin.sh" morning
    ```
 
-   `pi -p` in **text** mode only prints the model’s **final assistant text**, not tool traces — you can see a long reply in the terminal and still get **no DM** if the model skipped `send_discord_message`.
+   `pi -p` in **text** mode only prints the model's **final assistant text**, not tool traces — you can see a long reply in the terminal and still get **no DM** if the model skipped `send_discord_message`.
 
-3. **Verify the model actually called `send_discord_message`** — runs Pi with `--mode json` and **exits 1** unless the stream contains the extension’s success text (`Sent Discord DM`):
+3. **Verify the model actually called `send_discord_message`** — runs Pi with `--mode json` and **exits 1** unless the stream contains the extension's success text (`Sent Discord DM`):
 
    ```bash
-   /opt/proactive/run-checkin.sh morning --verify
-   # or: PROACTIVE_VERIFY=1 /opt/proactive/run-checkin.sh morning
+   "${PROACTIVE_ROOT:-/opt/proactive}/run-checkin.sh" morning --verify
+   # or: PROACTIVE_VERIFY=1 "${PROACTIVE_ROOT:-/opt/proactive}/run-checkin.sh" morning
    ```
 
 4. **Scheduled runs** — tail `/alfred/state/proactive-morning.log` (etc.) after a trigger; shorten the wait with `PROACTIVE_SCHEDULE` + `PROACTIVE_POLL_SECS` while testing.
 
-**No DM but the run “succeeded”:** (1) Env missing — `run-checkin.sh` sources env; don’t run raw `pi` without it. (2) Never DM’d the bot — DM it once. (3) Wrong user ID. (4) stderr lines `[discord-notify]` / `Discord send failed`. (5) Model skipped the tool — use **`--verify`**; ensure `--append-system-prompt /opt/proactive/append-discord-mandatory.md` is present (default in `run-checkin.sh` / scheduler).
+**No DM but the run "succeeded":** (1) Env missing — `run-checkin.sh` sources env; don't run raw `pi` without it. (2) Never DM'd the bot — DM it once. (3) Wrong user ID. (4) stderr lines `[discord-notify]` / `Discord send failed`. (5) Model skipped the tool — use **`--verify`**; ensure `--append-system-prompt` points at `${PROACTIVE_ROOT}/append-discord-mandatory.md` (default in `run-checkin.sh` / scheduler).
 
-**`Tool call validation failed` / `read<|channel|>commentary`:** Groq **`openai/gpt-oss-*`** models can corrupt tool names when Pi’s thinking mode is on. Proactive runs default to **`PROACTIVE_THINKING=off`** (`--thinking off`). If you overrode thinking, unset it or set `PROACTIVE_THINKING=off`. Alternatively set `PROACTIVE_MODEL` to a non–reasoning Groq model (e.g. `groq/llama-3.3-70b-versatile`).
+**`Tool call validation failed` / `read<|channel|>commentary`:** Groq **`openai/gpt-oss-*`** models can corrupt tool names when Pi's thinking mode is on. Proactive runs default to **`PROACTIVE_THINKING=off`** (`--thinking off`). If you overrode thinking, unset it or set `PROACTIVE_THINKING=off`. Alternatively set `PROACTIVE_MODEL` to a non–reasoning Groq model (e.g. `groq/llama-3.3-70b-versatile`).
 
-### 4. Web Search (optional — Tavily)
+### 5. Web Search (optional — Tavily)
 
-To give Alfred live web search with source-backed results, set:
+Set `TAVILY_API_KEY` in Railway to give Alfred live web search. Get a key at [tavily.com](https://www.tavily.com/).
 
-| Variable | Description |
-|----------|-------------|
-| `TAVILY_API_KEY` | Tavily API key for Alfred's `web_search` tool |
-
-Get a key at [tavily.com](https://www.tavily.com/), then set `TAVILY_API_KEY` in Railway.
-
-Default behavior is cost-conscious:
-- basic search depth
-- small result set
-- optional deep page extraction only when needed
-
-### 5. LLM Provider API Key
-
-Alfred uses the [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) under the hood, which supports multiple LLM providers. You need an API key for at least one.
-
-The `start.sh` script automatically detects whichever API keys you set and configures Pi accordingly. You can set one or multiple — just add the env var(s) for your preferred provider(s):
-
-| Provider | Env Variable | Get a Key |
-|----------|-------------|-----------|
-| Groq | `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) |
-| Anthropic | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
-| OpenAI | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
-| Google Gemini | `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) |
-
-> **Tip:** You can set multiple provider keys at once. The startup script builds `auth.json` with all detected providers, so you can switch between models at runtime using Pi's `/model` command.
-
----
-
-## Environment Variables Summary
-
-Set these in your Railway service settings:
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `TS_AUTHKEY` | **Yes** | Tailscale auth key for private network access |
-| `CALDAV_USERNAME` | Optional | Apple ID for iCloud CalDAV |
-| `CALDAV_APP_PASSWORD` | Optional | App-specific password for iCloud |
-| `GROQ_API_KEY` | At least one | Groq API key |
-| `ANTHROPIC_API_KEY` | At least one | Anthropic API key |
-| `OPENAI_API_KEY` | At least one | OpenAI API key |
-| `GEMINI_API_KEY` | At least one | Google Gemini API key |
-| `TAVILY_API_KEY` | Optional | Enables Tavily-backed `web_search` tool |
-| `DISCORD_BOT_TOKEN` | Optional | Discord bot token — enables DM bridge |
-| `DISCORD_PROMPT_TIMEOUT_MS` | No | Max time per request in ms (default: 300000 = 5 min) |
-| `DISCORD_TASK_TIMEOUT_MS` | No | Max runtime for background `/task` jobs in ms (default: 1800000 = 30 min) |
-| `DISCORD_DM_POLICY` | No | DM access policy: `open`, `owner_only`, or `allowlist` (default: `open`) |
-| `DISCORD_OWNER_USER_ID` | No | Required when `DISCORD_DM_POLICY=owner_only` |
-| `DISCORD_ALLOWED_USER_IDS` | No | Comma-separated Discord user IDs for `allowlist` mode |
-| `DISCORD_PROACTIVE_USER_ID` | No | DM recipient for proactive check-ins; defaults to `DISCORD_OWNER_USER_ID` |
-| `PROACTIVE_ENABLED` | No | Set to `1` to enable scheduled morning/midday/evening check-ins |
-| `PROACTIVE_SCHEDULE` | No | Three comma-separated times (default `8:00,12:00,18:00` local `PROACTIVE_TZ`) |
-| `PROACTIVE_MODEL` | No | Model for proactive `pi -p` runs (default `groq/openai/gpt-oss-20b`) |
-| `PROACTIVE_THINKING` | No | Pi thinking level for proactive runs (default `off`; avoids gpt-oss tool-name bugs on Groq) |
-| `PROACTIVE_TZ` | No | IANA timezone for proactive scheduler (default `America/Los_Angeles`) |
-| `PROACTIVE_POLL_SECS` | No | Poll interval in seconds (default `300`) |
-| `PROACTIVE_VERIFY` | No | Manual testing: `1` with `run-checkin.sh` = exit 1 unless Pi JSON output shows a successful `send_discord_message` |
-| `TASK_WEBHOOK_SECRET` | Optional | Secret for signing task completion webhooks (enables \"your task is done\" notifications in Discord) |
-| `TASK_WEBHOOK_PORT` | No | Port for the internal webhook HTTP server (default: 8080) |
-| `TASK_WEBHOOK_BASE_URL` | No | Internal callback base URL for background workers (default: `http://127.0.0.1:$TASK_WEBHOOK_PORT`) |
-| `SSH_PASSWORD` | No | Root SSH password fallback (default: `changeme`) |
-| `RAILWAY_RUN_UID` | **Yes** | Set to `0` — required for volumes to mount correctly |
-
-> You need **at least one** LLM API key. You can set multiple to switch between providers at runtime.
+Default behavior is cost-conscious: basic search depth, small result set, optional deep page extraction only when needed.
 
 ---
 
@@ -240,7 +287,7 @@ Create a volume and attach it to your service:
 
 ### 4. Set environment variables
 
-Add the variables from the table above in your Railway service settings.
+Add the variables from the [Railway Environment Variables](#railway-environment-variables-secrets--infra) table in your Railway service settings.
 
 ### 5. Deploy
 
@@ -319,7 +366,7 @@ If you want to customize it, edit `.pi/SYSTEM.md` in this repo and redeploy:
 
 ## Connecting to Alfred
 
-**Railway (default):** Plain `ssh` / `sftp` to Alfred’s Tailscale IP on port 22 often **times out** because Tailscale runs in **userspace** mode (Railway does not provide `/dev/net/tun` or `NET_ADMIN`). Use the **Tailscale CLI** after the [Tailscale app](https://tailscale.com/download) is running on your device:
+**Railway (default):** Plain `ssh` / `sftp` to Alfred's Tailscale IP on port 22 often **times out** because Tailscale runs in **userspace** mode (Railway does not provide `/dev/net/tun` or `NET_ADMIN`). Use the **Tailscale CLI** after the [Tailscale app](https://tailscale.com/download) is running on your device:
 
 ```bash
 tailscale ssh root@alfred
@@ -356,7 +403,7 @@ Startup picks **kernel TUN** only if **`/dev/net/tun`** exists in the container 
 
 If you run this image on a host that provides **`/dev/net/tun`** and **`CAP_NET_ADMIN`** (typical Docker flags: `--device /dev/net/tun --cap-add=NET_ADMIN`, or privileged on a VPS), startup **automatically** uses kernel TUN — check deploy logs for `Tailscale: kernel TUN`.
 
-Then from a device on your tailnet, **verify** (replace the IP with Alfred’s Tailscale IP from `tailscale status` or the admin console):
+Then from a device on your tailnet, **verify** (replace the IP with Alfred's Tailscale IP from `tailscale status` or the admin console):
 
 ```bash
 ssh root@100.x.x.x
@@ -419,7 +466,7 @@ When deploy logs show **`Tailscale: kernel TUN`** and Tailscale is up:
 - Use `mosh` if your setup supports it for more stable mobile connections
 - Make sure your terminal app supports mosh
 
-**`ssh` / `sftp` to Alfred’s Tailscale IP times out**
+**`ssh` / `sftp` to Alfred's Tailscale IP times out**
 - On **Railway**, there is usually **no `/dev/net/tun`**, so Tailscale runs in **userspace**; plain TCP to `100.x.x.x:22` does not reach `sshd`. Use **`tailscale ssh root@alfred`**. For native SFTP, run Alfred on a host that exposes **`/dev/net/tun`** + **`NET_ADMIN`** so logs show **`Tailscale: kernel TUN`** (see [SSH, SFTP, and file access](#ssh-sftp-and-file-access)).
 
 **`-bash: export: ... not a valid identifier` when logging in**

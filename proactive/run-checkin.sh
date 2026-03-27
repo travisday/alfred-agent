@@ -6,6 +6,8 @@
 
 set -euo pipefail
 
+PROACTIVE_ROOT="${PROACTIVE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+
 if [ -f /etc/profile.d/railway-env.sh ]; then
   # shellcheck source=/dev/null
   . /etc/profile.d/railway-env.sh
@@ -34,7 +36,7 @@ for arg in "$@"; do
   esac
 done
 
-PROMPT="/opt/proactive/prompts/${NAME}.md"
+PROMPT="${PROACTIVE_ROOT}/prompts/${NAME}.md"
 if [ ! -f "$PROMPT" ]; then
   echo "Missing prompt: $PROMPT" >&2
   exit 1
@@ -45,7 +47,7 @@ if [ -z "${DISCORD_BOT_TOKEN:-}" ] || { [ -z "${DISCORD_PROACTIVE_USER_ID:-}" ] 
   echo "If you are in SSH, run: source /etc/profile.d/railway-env.sh" >&2
 fi
 
-APPEND="/opt/proactive/append-discord-mandatory.md"
+APPEND="${PROACTIVE_ROOT}/append-discord-mandatory.md"
 # Groq openai/gpt-oss-* can emit Harmony-style channel tokens into tool names when thinking is on (e.g. read<|channel|>commentary).
 THINKING="${PROACTIVE_THINKING:-off}"
 

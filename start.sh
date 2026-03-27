@@ -7,11 +7,142 @@ if [ -z "$TS_AUTHKEY" ]; then
   exit 1
 fi
 
+# --- Clean macOS resource fork files (accumulate from SSHFS/Finder) ---
+find /alfred -maxdepth 2 -name '._*' -delete 2>/dev/null || true
+
 # --- Sync .pi/ config from Docker image into the volume ---
 if [ -d /opt/alfred-pi-config ]; then
   mkdir -p /alfred/.pi
   cp -a /opt/alfred-pi-config/. /alfred/.pi/
   echo "Synced .pi/ config into workspace"
+fi
+
+# --- Sync proactive scripts from image, seed prompts on first boot ---
+if [ -d /opt/proactive ]; then
+  mkdir -p /alfred/proactive
+  # Scripts are repo-owned code — overwrite on every boot
+  for f in /opt/proactive/*.sh /opt/proactive/*.md; do
+    [ -f "$f" ] && cp -a "$f" /alfred/proactive/
+  done
+  # Prompts are user content — seed once, never overwrite
+  if [ ! -d /alfred/proactive/prompts ]; then
+    mkdir -p /alfred/proactive/prompts
+    cat > /alfred/proactive/prompts/morning.md << 'PROMPT_EOF'
+# Morning check-in
+
+You are running as a scheduled proactive check-in (not a user-initiated conversation). Your job is to help the user start their day with clarity on what matters.
+
+**Steps:**
+
+1. **Read memory** (`/alfred/memory/`) — load active goals, commitments, habits, deadlines, and any carry-forward items from yesterday. This is your source of truth for what matters.
+2. **Pull today's calendar** — use `get_today_events`. Also use `get_upcoming` to see what's ahead this week.
+3. **Analyze the day's shape** — How much open time exists vs meetings? Does today's schedule support their stated goals, or is it all reactive? Flag conflicts, back-to-backs, or impossible stacks.
+4. **Cross-reference goals vs reality** — Which goals have open time allocated today? Which are at risk of slipping? Has anything from memory been dormant for days?
+5. **Send via Discord** — use `send_discord_message` with a scannable message:
+   - **Today's shape** (2-3 lines: meeting load, open blocks, key deadlines)
+   - **Goal alignment** (which goals get attention today, which don't)
+   - **Risks** (what could derail the day)
+   - **One question** — specific and decision-forcing. Not "how are you?" but something like: "You have 2 hours open this afternoon — should that go to [Goal A] or [Goal B]?" or "You committed to [X] on Monday but it hasn't moved — still a priority?"
+
+**Before you stop:** You **must** call the **`send_discord_message`** tool once with the full message you drafted (not just text in your reply). Check-ins are delivered **only** through that tool. If the tool returns an error, paste the same message in your final reply so the user still sees it.
+
+**Rules:**
+- Keep the Discord message short. Max ~15 lines. Bullets and bold for scannability.
+- Don't lecture or motivate. Be direct and useful.
+- Only update memory files if something clearly needs correcting (e.g., a deadline passed).
+- If memory is empty/thin, note it once and work with what the calendar gives you.
+- If Discord isn't configured, output the message as plain text.
+PROMPT_EOF
+    cat > /alfred/proactive/prompts/midday.md << 'PROMPT_EOF'
+# Midday check-in
+
+You are running as a scheduled proactive check-in (not a user-initiated conversation). Your job is a quick course-correction — help the user protect the rest of the day.
+
+**Steps:**
+
+1. **Read memory** (`/alfred/memory/`) — recall what mattered this morning: goals, priorities, any commitments or intentions.
+2. **Assess progress** — check `tasks.md` or any artifacts that show movement. What moved? What stalled? Name stalls plainly — no scolding.
+3. **Afternoon calendar** — use `get_today_events` or `get_upcoming` to show what's left today.
+4. **Identify the one thing most likely to slip** — based on goals, calendar, and what hasn't moved yet, pick the single item that needs a nudge before end of day.
+5. **Send via Discord** — use `send_discord_message` with a short message:
+   - **Status** (2-3 lines: what moved, what didn't)
+   - **Rest of day** (remaining meetings/open time)
+   - **Nudge** — the one thing that will slip if ignored
+   - **One question** — forces a quick decision or status update. Examples: "Is [X] still the top priority, or should we swap it for [Y]?" / "[Goal] hasn't been touched in 3 days — drop it, defer it, or protect time tomorrow?"
+
+**Before you stop:** You **must** call **`send_discord_message`** once with your full midday message. If the tool errors, paste the message in your final reply.
+
+**Rules:**
+- Shorter than the morning message. Max ~10 lines.
+- Don't repeat the full morning briefing — this is a delta/course-correction.
+- Don't update memory unless the user's priorities clearly shifted.
+- If Discord isn't configured, output the message as plain text.
+PROMPT_EOF
+    cat > /alfred/proactive/prompts/evening.md << 'PROMPT_EOF'
+# Evening check-in
+
+You are running as a scheduled proactive check-in (not a user-initiated conversation). Your job is to close out the day honestly and set up tomorrow.
+
+**Steps:**
+
+1. **Read memory** (`/alfred/memory/`) — load goals, commitments, habits, and anything that was flagged today.
+2. **Honest recap** — what got done vs what slipped, in plain language. Tie wins back to goals when you can. Don't sugarcoat or scold.
+3. **Goal trajectory** — zoom out. Are they making progress on their stated goals this week, or just staying busy? One line on alignment.
+4. **Carry-forward** — what should roll to tomorrow? If tasks or commitments exist, note what needs to move. Update `tasks.md` only when it clearly helps.
+5. **Tomorrow's shape** — use `get_calendar_events` for tomorrow. Give the shape in 2-3 lines (meeting load, open time, key events).
+6. **Send via Discord** — use `send_discord_message` with a scannable message:
+   - **Today** (what moved, what didn't — 2-3 lines)
+   - **Goal check** (one line on weekly trajectory)
+   - **Tomorrow** (shape of the day, carry-forward items)
+   - **One question** — reflective but concrete. Examples: "What would make tomorrow feel successful before it starts?" / "You've been heads-down on [X] all week — is that still where you want your energy?" / "[Goal] has been stalled since Tuesday — want me to block time for it tomorrow?"
+
+**Before you stop:** You **must** call **`send_discord_message`** once with your full evening wrap-up. If the tool errors, paste the message in your final reply.
+
+**Rules:**
+- Keep it honest and brief. Max ~12 lines.
+- Update memory if something clearly changed (a goal completed, a deadline passed, a new commitment emerged).
+- If the day was empty/quiet, still send a brief note — it confirms the check-in ran and keeps the rhythm.
+- If Discord isn't configured, output the message as plain text.
+PROMPT_EOF
+    echo "Seeded default proactive prompts in /alfred/proactive/prompts/"
+  fi
+  echo "Synced proactive scripts into workspace"
+fi
+
+# --- Load /alfred/config.env (user preferences on the volume) ---
+# Simple KEY=VALUE parser — Railway env vars always override.
+apply_config() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    # Skip blank lines and comments
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    # Strip inline comments, trim whitespace
+    line="${line%%#*}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [ -z "$line" ] && continue
+    local key="${line%%=*}"
+    local val="${line#*=}"
+    # Only apply if not already set in the environment (Railway wins)
+    if [ -z "${!key+x}" ]; then
+      export "$key=$val"
+    fi
+  done < "$file"
+}
+apply_config /alfred/config.env
+
+# --- Generate default config.env on first boot ---
+if [ ! -f /alfred/config.env ]; then
+  cp /opt/config.env.template /alfred/config.env
+  echo "Generated default /alfred/config.env (all commented out)"
+fi
+
+# --- Unify timezone ---
+if [ -n "${TIMEZONE:-}" ]; then
+  : "${PROACTIVE_TZ:=$TIMEZONE}"
+  : "${CALDAV_TIMEZONE:=$TIMEZONE}"
+  export PROACTIVE_TZ CALDAV_TIMEZONE
 fi
 
 # --- Tailscale ---
@@ -111,11 +242,13 @@ if [ -n "${GROQ_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${OPEN
   HAS_LLM_KEY=true
 fi
 if [ "${PROACTIVE_ENABLED:-}" = "1" ] && [ -n "${DISCORD_BOT_TOKEN:-}" ] && [ -n "$PROACTIVE_RECIPIENT" ] && [ "$HAS_LLM_KEY" = true ]; then
-  if [ -x /opt/proactive/scheduler.sh ]; then
-    /opt/proactive/scheduler.sh &
-    echo "Proactive check-ins scheduler started (TZ=${PROACTIVE_TZ:-America/Los_Angeles})"
+  PROACTIVE_ROOT="${PROACTIVE_ROOT:-/alfred/proactive}"
+  export PROACTIVE_ROOT
+  if [ -x "${PROACTIVE_ROOT}/scheduler.sh" ]; then
+    "${PROACTIVE_ROOT}/scheduler.sh" &
+    echo "Proactive check-ins scheduler started (TZ=${PROACTIVE_TZ:-${TIMEZONE:-America/Los_Angeles}}, PROACTIVE_ROOT=${PROACTIVE_ROOT})"
   else
-    echo "WARNING: PROACTIVE_ENABLED but /opt/proactive/scheduler.sh missing or not executable"
+    echo "WARNING: PROACTIVE_ENABLED but ${PROACTIVE_ROOT}/scheduler.sh missing or not executable"
   fi
 elif [ "${PROACTIVE_ENABLED:-}" = "1" ]; then
   echo "WARNING: PROACTIVE_ENABLED but proactive scheduler not started (need DISCORD_BOT_TOKEN, DISCORD_PROACTIVE_USER_ID or DISCORD_OWNER_USER_ID, and at least one LLM API key)"

@@ -38,6 +38,7 @@ RUN chmod +x /opt/proactive/scheduler.sh /opt/proactive/run-checkin.sh /opt/proa
 COPY discord-bridge/ /opt/discord-bridge/
 RUN cd /opt/discord-bridge && npm install && npm run build
 
+COPY config.env.template /opt/config.env.template
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 

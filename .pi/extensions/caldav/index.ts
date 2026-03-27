@@ -94,7 +94,7 @@ function getConfig() {
     serverUrl: process.env.CALDAV_SERVER_URL ?? DEFAULT_SERVER,
     username,
     password,
-    timezone: process.env.CALDAV_TIMEZONE ?? DEFAULT_TIMEZONE,
+    timezone: process.env.CALDAV_TIMEZONE ?? process.env.TIMEZONE ?? DEFAULT_TIMEZONE,
     configured: Boolean(username && password),
   };
 }

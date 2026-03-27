@@ -1,5 +1,6 @@
 node_modules/
 .env
+.claude/
 
 # CalDAV extension deps (installed at Docker build)
 .pi/extensions/caldav/node_modules/
