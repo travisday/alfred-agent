@@ -65,7 +65,7 @@ vi /alfred/config.env
 Or via SSHFS (mount with `noappledouble` to prevent macOS `._*` resource fork files):
 
 ```bash
-sshfs root@alfred:/alfred ~/alfred -o noappledouble
+sshfs root@alfred:/alfred ~/alfred -o noappledouble,reconnect,follow_symlinks
 ```
 
 Changes take effect on the next container restart.

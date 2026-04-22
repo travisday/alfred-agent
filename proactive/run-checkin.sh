@@ -59,7 +59,7 @@ if [ "$VERIFY" = true ]; then
   set +e
   pi -p --no-session --mode json \
     --thinking "$THINKING" \
-    --model "${PROACTIVE_MODEL:-groq/openai/gpt-oss-20b}" \
+    --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
     --append-system-prompt "$APPEND" \
     "@${PROMPT}" 2>&1 | tee "$TMP"
   ST="${PIPESTATUS[0]}"
@@ -78,6 +78,6 @@ fi
 
 exec pi -p --no-session \
   --thinking "$THINKING" \
-  --model "${PROACTIVE_MODEL:-groq/openai/gpt-oss-20b}" \
+  --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
   --append-system-prompt "$APPEND" \
   "@${PROMPT}"
