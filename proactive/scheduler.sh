@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Proactive check-ins: poll every POLL_SECS in PROACTIVE_TZ,
-# run pi -p at each scheduled local time once per calendar day per slot.
+# Proactive scheduler: polls every POLL_SECS in PROACTIVE_TZ,
+# running check-ins, daily maintenance, 2h maintenance ticks,
+# and weekly reviews.
 #
-# Catch-up: if the container was down during a slot's window, the slot fires
-# on the next poll as long as `now >= slot_time` and the slot hasn't run today.
+# Slot types:
+#   check-in (morning/midday/evening) — narrow window only, no catch-up
+#   _daily   — once/day mechanical maintenance (no LLM), before first check-in
+#   _maint   — every 2h self-monitoring tick (LLM), git commit after
+#   _weekly  — Sunday after 18:00 weekly review (LLM)
 #
-# Verified delivery: runs pi in JSON mode and checks for "Sent Discord DM"
-# in the output. If missing, retries once before leaving the slot incomplete.
+# No catch-up on restart: if the container was down during a slot's window,
+# it does NOT fire retroactively.
 
 set -u
 
@@ -62,7 +66,20 @@ time_to_minutes() {
   echo $((10#$h * 60 + 10#$m))
 }
 
-# Run a single check-in with verified Discord delivery.
+# --- Git helper: commit if dirty ---
+git_commit_if_dirty() {
+  local msg="${1:-auto: memory snapshot}"
+  (
+    cd /alfred
+    git add -A 2>/dev/null
+    git diff --cached --quiet 2>/dev/null || {
+      git commit -m "$msg" --no-gpg-sign 2>/dev/null
+      git remote get-url origin &>/dev/null && git push origin HEAD 2>/dev/null
+    }
+  ) || true
+}
+
+# --- Run a single check-in with verified Discord delivery ---
 # Returns 0 only if pi succeeds AND "Sent Discord DM" appears in output.
 run_checkin_verified() {
   local name="$1"
@@ -121,6 +138,104 @@ run_checkin_with_retry() {
   return 1
 }
 
+# --- Daily maintenance (mechanical, no LLM) ---
+run_daily_maintenance() {
+  log "Running daily maintenance"
+
+  # Reset today.md with today's date
+  echo "# Today: $(date +%Y-%m-%d)" > /alfred/state/today.md
+  echo "" >> /alfred/state/today.md
+  log "Reset today.md"
+
+  # Archive completed tasks from tasks.md → tasks-archive.md
+  if [ -f /alfred/tasks.md ]; then
+    local archived=0
+    local tmp_keep tmp_archive
+    tmp_keep="$(mktemp)"
+    tmp_archive="$(mktemp)"
+    while IFS= read -r line || [ -n "$line" ]; do
+      if echo "$line" | grep -qE '^\s*-\s*\[x\]'; then
+        echo "$line" >> "$tmp_archive"
+        archived=$((archived + 1))
+      else
+        echo "$line" >> "$tmp_keep"
+      fi
+    done < /alfred/tasks.md
+    if [ "$archived" -gt 0 ]; then
+      # Append archived tasks with date header
+      {
+        echo ""
+        echo "## Archived $(date +%Y-%m-%d)"
+        cat "$tmp_archive"
+      } >> /alfred/tasks-archive.md
+      mv "$tmp_keep" /alfred/tasks.md
+      log "Archived $archived completed tasks"
+    fi
+    rm -f "$tmp_keep" "$tmp_archive"
+  fi
+
+  # Truncate proactive logs to last 500 lines
+  for logfile in "${STATE_DIR}"/proactive-*.log; do
+    [ -f "$logfile" ] || continue
+    local lines
+    lines="$(wc -l < "$logfile")"
+    if [ "$lines" -gt 500 ]; then
+      local tmp_log
+      tmp_log="$(mktemp)"
+      tail -n 500 "$logfile" > "$tmp_log"
+      mv "$tmp_log" "$logfile"
+      log "Truncated $(basename "$logfile") from $lines to 500 lines"
+    fi
+  done
+
+  log "Daily maintenance complete"
+}
+
+# --- Maintenance tick (LLM self-monitoring) ---
+run_maintenance_tick() {
+  local prompt="${PROACTIVE_ROOT}/prompts/maintenance.md"
+  if [ ! -f "$prompt" ]; then
+    log "ERROR: missing maintenance prompt: $prompt"
+    return 1
+  fi
+  local logfile="${STATE_DIR}/proactive-maintenance.log"
+
+  log "Starting maintenance tick"
+  set +e
+  (
+    cd /alfred || exit 1
+    pi -p --no-session --mode json \
+      --thinking "$THINKING" \
+      --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
+      "@${prompt}" 2>&1
+  ) | tee -a "$logfile" > /dev/null
+  set -e
+  log "Maintenance tick complete"
+}
+
+# --- Weekly review (LLM) ---
+run_weekly_review() {
+  local prompt="${PROACTIVE_ROOT}/prompts/weekly-review.md"
+  if [ ! -f "$prompt" ]; then
+    log "ERROR: missing weekly review prompt: $prompt"
+    return 1
+  fi
+  local logfile="${STATE_DIR}/proactive-weekly.log"
+
+  log "Starting weekly review"
+  set +e
+  (
+    cd /alfred || exit 1
+    pi -p --no-session --mode json \
+      --thinking "$THINKING" \
+      --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
+      --append-system-prompt "${PROACTIVE_ROOT}/append-discord-mandatory.md" \
+      "@${prompt}" 2>&1
+  ) | tee -a "$logfile" > /dev/null
+  set -e
+  log "Weekly review complete"
+}
+
 IFS=',' read -ra TIMES <<<"$SCHEDULE"
 if [ "${#TIMES[@]}" -ne 3 ]; then
   log "ERROR: PROACTIVE_SCHEDULE must have exactly three comma-separated times (morning,midday,evening); got: $SCHEDULE"
@@ -137,7 +252,17 @@ while true; do
     now_h="$(date +%H)"
     now_m="$(date +%M)"
     now_min=$((10#$now_h * 60 + 10#$now_m))
+    now_dow="$(date +%u)"  # 1=Monday, 7=Sunday
 
+    # --- Daily maintenance (once/day, before first check-in) ---
+    if [ "$(get_slot_date _daily)" != "$date_part" ]; then
+      run_daily_maintenance
+      git_commit_if_dirty "auto: daily maintenance $(date +%Y-%m-%dT%H:%M)"
+      set_slot_date _daily "$date_part"
+    fi
+
+    # --- Check-in slots (narrow window only, no catch-up) ---
+    window=$((POLL_SECS / 60 + 2))  # ~7 min with 300s poll
     for i in 0 1 2; do
       slot="${SLOT_NAMES[$i]}"
       t="${TIMES[$i]// /}"
@@ -147,9 +272,8 @@ while true; do
         continue
       fi
 
-      # Catch-up: fire if current time is at or past the slot time (not a narrow window).
-      # Once-per-day idempotency is ensured by proactive-slots.state.
-      if [ "$now_min" -ge "$slot_min" ]; then
+      # Narrow window: only fire if within window minutes of slot time
+      if [ "$now_min" -ge "$slot_min" ] && [ "$now_min" -le $((slot_min + window)) ]; then
         log "Slot pending: $slot ($t) — current time $(date +%H:%M)"
         if run_checkin_with_retry "$slot"; then
           log "Slot complete (verified): $slot"
@@ -157,8 +281,28 @@ while true; do
           log "WARNING: slot fired without verified delivery: $slot — marking done to prevent duplicate sends"
         fi
         set_slot_date "$slot" "$date_part"
+        git_commit_if_dirty "auto: check-in $slot $(date +%Y-%m-%dT%H:%M)"
       fi
     done
+
+    # --- Maintenance tick (every 2h, self-monitoring with LLM) ---
+    maint_block="${date_part}-$(printf '%02d' $((10#$now_h / 2 * 2)))"
+    if [ "$(get_slot_date _maint)" != "$maint_block" ]; then
+      run_maintenance_tick
+      git_commit_if_dirty "auto: maintenance $(date +%Y-%m-%dT%H:%M)"
+      set_slot_date _maint "$maint_block"
+    fi
+
+    # --- Weekly review (Sunday after 18:00) ---
+    week_key="$(date +%Y)-W$(date +%V)"
+    if [ "$now_dow" = "7" ] && [ "$now_min" -ge 1080 ]; then
+      if [ "$(get_slot_date _weekly)" != "$week_key" ]; then
+        run_weekly_review
+        git_commit_if_dirty "auto: weekly review $(date +%Y-%m-%dT%H:%M)"
+        set_slot_date _weekly "$week_key"
+      fi
+    fi
+
   ) 200>>"$LOCK_FILE" || true
 
   sleep "$POLL_SECS"

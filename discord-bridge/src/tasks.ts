@@ -72,7 +72,25 @@ function scheduleSave(): void {
   }, 500);
 }
 
+function pruneOldTasks(retentionDays = 7): number {
+  const cutoff = Date.now() - retentionDays * 86_400_000;
+  let pruned = 0;
+  for (const [id, task] of tasks) {
+    const terminal = task.status === "completed" || task.status === "failed" || task.status === "cancelled";
+    if (terminal && task.completedAt && new Date(task.completedAt).getTime() < cutoff) {
+      tasks.delete(id);
+      pruned++;
+    }
+  }
+  if (pruned > 0) scheduleSave();
+  return pruned;
+}
+
 loadTasksFromDisk();
+const pruned = pruneOldTasks();
+if (pruned > 0) {
+  console.log("[Discord bridge] Pruned", pruned, "old terminal tasks");
+}
 
 export interface CreateTaskOptions {
   message: Message;
