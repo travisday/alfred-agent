@@ -388,8 +388,21 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
       await Promise.race([promptPromise, timeoutPromise]);
     } finally {
       unsub();
-      taskSession.dispose();
     }
+
+    // Fallback: if events didn't capture text, extract from session messages
+    if (!lastAssistantText) {
+      const msgs = taskSession.messages as { role?: string; content?: unknown }[];
+      const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
+      if (lastAssistant) {
+        lastAssistantText = extractTextFromMessage(lastAssistant);
+        if (lastAssistantText) {
+          console.log("[Discord bridge]", taskCtx, "BG: Recovered text from session messages");
+        }
+      }
+    }
+
+    taskSession.dispose();
 
     const summary = (lastAssistantText || "Task completed.").slice(0, 600);
     await report("completed", summary);
@@ -475,6 +488,31 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
       clearTimeout(timeoutId!);
       clearTimeout(reassuranceId!);
       unsub();
+    }
+
+    // Fallback: if events didn't capture text, extract from session messages directly
+    if (!lastAssistantText) {
+      const msgs = s.messages as { role?: string; content?: unknown }[];
+      const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
+      if (lastAssistant) {
+        lastAssistantText = extractTextFromMessage(lastAssistant);
+        if (lastAssistantText) {
+          console.log("[Discord bridge]", taskCtx, "Recovered text from session messages (events missed it)");
+        } else {
+          // Log content block types for debugging
+          const content = lastAssistant.content;
+          if (Array.isArray(content)) {
+            const types = content
+              .filter((b): b is { type: string } => typeof b === "object" && b != null && "type" in b)
+              .map((b) => b.type);
+            console.warn("[Discord bridge]", taskCtx, "Assistant message has no text blocks. Content types:", types);
+          } else {
+            console.warn("[Discord bridge]", taskCtx, "Assistant message content is not an array:", typeof content);
+          }
+        }
+      } else {
+        console.warn("[Discord bridge]", taskCtx, "No assistant message found in session messages after prompt");
+      }
     }
 
     const textToSend = lastAssistantText.trim();
