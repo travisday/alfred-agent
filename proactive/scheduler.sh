@@ -152,8 +152,11 @@ while true; do
       if [ "$now_min" -ge "$slot_min" ]; then
         log "Slot pending: $slot ($t) — current time $(date +%H:%M)"
         if run_checkin_with_retry "$slot"; then
-          set_slot_date "$slot" "$date_part"
+          log "Slot complete (verified): $slot"
+        else
+          log "WARNING: slot fired without verified delivery: $slot — marking done to prevent duplicate sends"
         fi
+        set_slot_date "$slot" "$date_part"
       fi
     done
   ) 200>>"$LOCK_FILE" || true
