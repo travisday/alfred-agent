@@ -256,27 +256,23 @@ tailscale up --authkey="${TS_AUTHKEY}" --hostname=alfred --ssh
 # Dynamically builds auth.json from whichever LLM API keys are present.
 mkdir -p /root/.pi/agent
 
-AUTH_JSON="{"
-FIRST=true
-
-add_provider() {
-  local name="$1" key="$2"
-  if [ -n "$key" ]; then
-    $FIRST || AUTH_JSON="${AUTH_JSON},"
-    AUTH_JSON="${AUTH_JSON}\"${name}\":{\"type\":\"api_key\",\"key\":\"${key}\"}"
-    FIRST=false
-  fi
-}
-
-add_provider "groq"      "$GROQ_API_KEY"
-add_provider "anthropic"  "$ANTHROPIC_API_KEY"
-add_provider "openai"     "$OPENAI_API_KEY"
-add_provider "google"     "$GEMINI_API_KEY"
-
-AUTH_JSON="${AUTH_JSON}}"
-
-if [ "$FIRST" = false ]; then
-  echo "$AUTH_JSON" > /root/.pi/agent/auth.json
+if node -e '
+  const providers = {
+    groq: process.env.GROQ_API_KEY,
+    anthropic: process.env.ANTHROPIC_API_KEY,
+    openai: process.env.OPENAI_API_KEY,
+    google: process.env.GEMINI_API_KEY,
+  };
+  const auth = {};
+  for (const [name, key] of Object.entries(providers)) {
+    if (key) auth[name] = { type: "api_key", key };
+  }
+  if (Object.keys(auth).length > 0) {
+    process.stdout.write(JSON.stringify(auth));
+  } else {
+    process.exit(1);
+  }
+' > /root/.pi/agent/auth.json 2>/dev/null; then
   chmod 600 /root/.pi/agent/auth.json
   echo "Configured LLM providers in auth.json"
 else

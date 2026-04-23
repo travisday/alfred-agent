@@ -1,0 +1,9 @@
+.git
+.DS_Store
+._*
+.claude
+README.md
+node_modules
+discord-bridge/node_modules
+discord-bridge/dist
+.pi/extensions/*/node_modules

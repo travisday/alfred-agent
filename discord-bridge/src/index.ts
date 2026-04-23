@@ -1,7 +1,7 @@
 /**
  * Alfred Discord Bridge — talk to Alfred via DMs.
  */
-import { createAgentSession, SessionManager, type AgentSession } from "@mariozechner/pi-coding-agent";
+import { createAgentSession, SessionManager, ModelRegistry, AuthStorage, type AgentSession } from "@mariozechner/pi-coding-agent";
 import { Client, DMChannel, Events, GatewayIntentBits, Partials, type Message } from "discord.js";
 import http from "node:http";
 import crypto from "node:crypto";
@@ -101,6 +101,31 @@ function extractTextFromMessage(msg: { content?: unknown }): string {
   return "";
 }
 
+function resolveConfiguredModel(): { model?: any; modelRegistry?: ModelRegistry } {
+  const alfredModel = (process.env.ALFRED_MODEL ?? "").trim();
+  if (!alfredModel) return {};
+
+  const slashIdx = alfredModel.indexOf("/");
+  if (slashIdx < 0) {
+    console.warn(`[Discord bridge] ALFRED_MODEL="${alfredModel}" missing provider/ prefix, using default`);
+    return {};
+  }
+
+  const provider = alfredModel.slice(0, slashIdx);
+  const modelId = alfredModel.slice(slashIdx + 1);
+  const authStorage = AuthStorage.create();
+  const modelRegistry = new ModelRegistry(authStorage);
+  const model = modelRegistry.find(provider, modelId);
+
+  if (model) {
+    console.log(`[Discord bridge] Resolved ALFRED_MODEL: ${provider}/${modelId}`);
+    return { model, modelRegistry };
+  }
+
+  console.warn(`[Discord bridge] ALFRED_MODEL="${alfredModel}" not found in model registry, using default`);
+  return { modelRegistry };
+}
+
 async function getOrCreateSession(forceNew = false): Promise<AgentSession> {
   if (session && !forceNew) return session;
   if (session) {
@@ -109,10 +134,13 @@ async function getOrCreateSession(forceNew = false): Promise<AgentSession> {
   }
 
   const sessionManager = SessionManager.create(ALFRED_CWD, SESSION_DIR);
+  const { model, modelRegistry } = resolveConfiguredModel();
   console.log("[Discord bridge] Creating new Pi session");
   const { session: s, modelFallbackMessage } = await createAgentSession({
     cwd: ALFRED_CWD,
     sessionManager,
+    ...(model && { model }),
+    ...(modelRegistry && { modelRegistry }),
   });
 
   if (modelFallbackMessage) {
@@ -357,9 +385,12 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
   try {
     await report("running", "Background task started.");
     const manager = SessionManager.create(ALFRED_CWD, `${SESSION_DIR}/tasks/${task.id}`);
+    const { model: bgModel, modelRegistry: bgRegistry } = resolveConfiguredModel();
     const { session: taskSession } = await createAgentSession({
       cwd: ALFRED_CWD,
       sessionManager: manager,
+      ...(bgModel && { model: bgModel }),
+      ...(bgRegistry && { modelRegistry: bgRegistry }),
     });
 
     let lastAssistantText = "";
@@ -774,6 +805,19 @@ async function main(): Promise<void> {
   });
 
   await client.login(token);
+
+  const shutdown = () => {
+    console.log("[Discord bridge] Shutting down...");
+    if (session) {
+      session.abort();
+      session.dispose();
+      session = null;
+    }
+    client.destroy();
+    process.exit(0);
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
 main().catch((err) => {

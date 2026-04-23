@@ -74,7 +74,9 @@ git_commit_if_dirty() {
     git add -A 2>/dev/null
     git diff --cached --quiet 2>/dev/null || {
       git commit -m "$msg" --no-gpg-sign 2>/dev/null
-      git remote get-url origin &>/dev/null && git push origin HEAD 2>/dev/null
+      if git remote get-url origin &>/dev/null; then
+        git push origin HEAD 2>&1 || log "WARNING: git push failed (will retry next cycle)"
+      fi
     }
   ) || true
 }
@@ -146,6 +148,14 @@ run_daily_maintenance() {
   echo "# Today: $(date +%Y-%m-%d)" > /alfred/state/today.md
   echo "" >> /alfred/state/today.md
   log "Reset today.md"
+
+  # Reset check-in failure counters from previous day
+  if [ -f "$STATE_FILE" ]; then
+    local tmp_state
+    tmp_state="$(mktemp)"
+    awk '!/^_fail_/' "$STATE_FILE" > "$tmp_state"
+    mv "$tmp_state" "$STATE_FILE"
+  fi
 
   # Archive completed tasks from tasks.md → tasks-archive.md
   if [ -f /alfred/tasks.md ]; then
@@ -277,11 +287,22 @@ while true; do
         log "Slot pending: $slot ($t) — current time $(date +%H:%M)"
         if run_checkin_with_retry "$slot"; then
           log "Slot complete (verified): $slot"
+          set_slot_date "$slot" "$date_part"
+          git_commit_if_dirty "auto: check-in $slot $(date +%Y-%m-%dT%H:%M)"
         else
-          log "WARNING: slot fired without verified delivery: $slot — marking done to prevent duplicate sends"
+          local fail_key="_fail_${slot}"
+          local prev_fails
+          prev_fails="$(get_slot_date "$fail_key")"
+          prev_fails="${prev_fails:-0}"
+          local new_fails=$((prev_fails + 1))
+          if [ "$new_fails" -ge 3 ]; then
+            log "ERROR: $slot failed $new_fails times today, giving up"
+            set_slot_date "$slot" "$date_part"
+          else
+            set_slot_date "$fail_key" "$new_fails"
+            log "WARNING: $slot delivery failed (attempt $new_fails/3), will retry next poll"
+          fi
         fi
-        set_slot_date "$slot" "$date_part"
-        git_commit_if_dirty "auto: check-in $slot $(date +%Y-%m-%dT%H:%M)"
       fi
     done
 
@@ -294,7 +315,7 @@ while true; do
     fi
 
     # --- Weekly review (Sunday after 18:00) ---
-    week_key="$(date +%Y)-W$(date +%V)"
+    week_key="$(date +%G)-W$(date +%V)"
     if [ "$now_dow" = "7" ] && [ "$now_min" -ge 1080 ]; then
       if [ "$(get_slot_date _weekly)" != "$week_key" ]; then
         run_weekly_review
