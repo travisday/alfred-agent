@@ -50,7 +50,7 @@ docker build -t alfred-agent .
 
 ## Key Patterns
 
-- **Volume is personal data only:** `/alfred/` contains memory, projects, tasks, journal — Travis's data. Agent behavior (voice, operating loop, memory rules) lives in `.pi/SYSTEM.md` in the repo, synced to the container on every boot.
+- **Volume is personal data only:** `/alfred/` contains memory, projects, tasks, journal — Travis's data. Agent behavior (voice, operating loop, memory rules) lives in `.pi/SYSTEM.md` in the repo, synced to the container on every boot. Git tracks only personal data — `.pi/`, `proactive/`, `.tailscale/`, logs, and session state are all gitignored (`.gitignore` is written by `start.sh` on every boot).
 - **Sessions are ephemeral:** Discord sessions and task sessions are disposable. `start.sh` cleans up `.jsonl` files >2 days old and task sessions >7 days old on boot. The `SessionManager.continueRecent()` creates a fresh session when no files exist.
 - **Proactive check-ins are standalone:** Check-ins use `--no-session` — they read memory files per their prompt instructions without sharing the Discord DM session. No stale context bleed.
 - **Prompt versioning:** Proactive prompts are version-gated via `/alfred/proactive/prompts/.version`. Bump `PROMPT_VERSION` in `start.sh` to re-seed all prompts on next boot.

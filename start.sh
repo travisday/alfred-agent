@@ -215,6 +215,27 @@ cd /alfred
 git config user.name "Alfred" 2>/dev/null || true
 git config user.email "alfred@automated" 2>/dev/null || true
 
+# Ensure .gitignore exists — only personal data should be tracked.
+# Agent infrastructure is synced from the Docker image on every boot.
+cat > /alfred/.gitignore << 'GITIGNORE_EOF'
+# Agent infrastructure (overwritten from image on every boot)
+.pi/
+proactive/
+
+# Ephemeral / operational state
+state/proactive-slots.state
+state/proactive-*.log
+state/task-sessions/
+state/discord-tasks.json
+
+# Tailscale networking state
+.tailscale/
+
+# OS artifacts
+.DS_Store
+._*
+GITIGNORE_EOF
+
 # If GITHUB_TOKEN is set and a remote exists, ensure the URL includes auth
 if [ -n "${GITHUB_TOKEN:-}" ] && [ -d /alfred/.git ]; then
   current_url="$(cd /alfred && git remote get-url origin 2>/dev/null || true)"
@@ -228,6 +249,10 @@ fi
 if [ ! -d /alfred/.git ]; then
   cd /alfred && git init && git add -A && git commit -m "init: first boot snapshot" 2>/dev/null || true
   echo "Initialized git repo in /alfred for memory versioning"
+else
+  # Existing deployment: untrack paths now covered by .gitignore
+  (cd /alfred && git rm -r --cached .pi/ proactive/ .tailscale/ state/proactive-slots.state state/task-sessions/ state/discord-tasks.json 2>/dev/null || true)
+  (cd /alfred && git rm --cached state/proactive-*.log 2>/dev/null || true)
 fi
 
 # --- Unify timezone ---
