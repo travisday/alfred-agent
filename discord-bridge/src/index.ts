@@ -127,15 +127,20 @@ function resolveConfiguredModel(): { model?: any; modelRegistry?: ModelRegistry 
 }
 
 async function getOrCreateSession(forceNew = false): Promise<AgentSession> {
-  if (session && !forceNew) return session;
+  if (forceNew && session) {
+    session.dispose();
+    session = null;
+  }
+
+  // Reload session from disk before each message so proactive entries are picked up
   if (session) {
     session.dispose();
     session = null;
   }
 
-  const sessionManager = SessionManager.create(ALFRED_CWD, SESSION_DIR);
+  const sessionManager = SessionManager.continueRecent(ALFRED_CWD, SESSION_DIR);
   const { model, modelRegistry } = resolveConfiguredModel();
-  console.log("[Discord bridge] Creating new Pi session");
+  console.log("[Discord bridge] Continuing Pi session (or creating new)");
   const { session: s, modelFallbackMessage } = await createAgentSession({
     cwd: ALFRED_CWD,
     sessionManager,
@@ -219,9 +224,7 @@ function isLikelyLongRunningTask(content: string): boolean {
 
 function buildForegroundPrompt(content: string): string {
   return [
-    "You are in FAST-ANSWER mode for Discord.",
-    "If the answer is directly available from current chat context and loaded memory, answer normally.",
-    `If you need to read/search files, run commands, or gather additional project context, respond with exactly: ${BACKGROUND_REQUIRED_TOKEN}`,
+    `If this request requires extensive research, multi-file scanning, or long-running operations, respond with exactly: ${BACKGROUND_REQUIRED_TOKEN}`,
     "Do not add extra words when returning that token.",
     "",
     content,

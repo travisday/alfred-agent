@@ -99,7 +99,7 @@ run_checkin_verified() {
   set +e
   (
     cd /alfred || exit 1
-    pi -p --no-session --mode json \
+    pi -p --continue --session-dir /alfred/.pi/sessions/discord --mode json \
       --thinking "$THINKING" \
       --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
       --append-system-prompt "${PROACTIVE_ROOT}/append-discord-mandatory.md" \
@@ -214,7 +214,7 @@ run_maintenance_tick() {
   set +e
   (
     cd /alfred || exit 1
-    pi -p --no-session --mode json \
+    pi -p --continue --session-dir /alfred/.pi/sessions/discord --mode json \
       --thinking "$THINKING" \
       --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
       "@${prompt}" 2>&1
@@ -236,7 +236,7 @@ run_weekly_review() {
   set +e
   (
     cd /alfred || exit 1
-    pi -p --no-session --mode json \
+    pi -p --continue --session-dir /alfred/.pi/sessions/discord --mode json \
       --thinking "$THINKING" \
       --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
       --append-system-prompt "${PROACTIVE_ROOT}/append-discord-mandatory.md" \
