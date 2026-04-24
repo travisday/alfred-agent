@@ -29,7 +29,7 @@ interface PersistedTasksFile {
   tasks: TaskRecord[];
 }
 
-const TASKS_FILE = process.env.DISCORD_TASKS_FILE ?? "/alfred/.pi/sessions/discord/tasks.json";
+const TASKS_FILE = process.env.DISCORD_TASKS_FILE ?? "/alfred/state/discord-tasks.json";
 
 const tasks = new Map<string, TaskRecord>();
 

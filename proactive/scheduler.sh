@@ -99,7 +99,7 @@ run_checkin_verified() {
   set +e
   (
     cd /alfred || exit 1
-    pi -p --continue --session-dir /alfred/.pi/sessions/discord --mode json \
+    pi -p --no-session --mode json \
       --thinking "$THINKING" \
       --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
       --append-system-prompt "${PROACTIVE_ROOT}/append-discord-mandatory.md" \
@@ -148,6 +148,16 @@ run_daily_maintenance() {
   echo "# Today: $(date +%Y-%m-%d)" > /alfred/state/today.md
   echo "" >> /alfred/state/today.md
   log "Reset today.md"
+
+  # Stamp active-context.md with today's date so check-ins see fresh state
+  if [ -f /alfred/state/active-context.md ]; then
+    if grep -q '^Last updated:' /alfred/state/active-context.md; then
+      sed -i "s/^Last updated:.*/Last updated: $(date +%Y-%m-%d)/" /alfred/state/active-context.md
+    else
+      sed -i "1s/^/Last updated: $(date +%Y-%m-%d)\n/" /alfred/state/active-context.md
+    fi
+    log "Stamped active-context.md"
+  fi
 
   # Reset check-in failure counters from previous day
   if [ -f "$STATE_FILE" ]; then
@@ -236,7 +246,7 @@ run_weekly_review() {
   set +e
   (
     cd /alfred || exit 1
-    pi -p --continue --session-dir /alfred/.pi/sessions/discord --mode json \
+    pi -p --no-session --mode json \
       --thinking "$THINKING" \
       --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
       --append-system-prompt "${PROACTIVE_ROOT}/append-discord-mandatory.md" \

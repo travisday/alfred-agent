@@ -183,13 +183,13 @@ async function sendToDiscord(channel: DMChannel, text: string, replyTo?: Message
 }
 
 function parseTaskCommand(content: string): string | null {
-  if (!content.toLowerCase().startsWith("/task")) return null;
-  return content.slice("/task".length).trim();
+  if (!content.toLowerCase().startsWith("!task")) return null;
+  return content.slice("!task".length).trim();
 }
 
 function parseStatusCommand(content: string): string | null {
-  if (!content.toLowerCase().startsWith("/status")) return null;
-  return content.slice("/status".length).trim() || null;
+  if (!content.toLowerCase().startsWith("!status")) return null;
+  return content.slice("!status".length).trim() || null;
 }
 
 function isLikelyLongRunningTask(content: string): boolean {
@@ -258,7 +258,7 @@ async function showTaskStatus(channel: DMChannel, message: Message, maybeTaskId:
   const tasks = listTasksByDiscordUser(userId, 5);
   if (tasks.length === 0) {
     await channel.send({
-      content: "No tasks found yet. Use `/task <request>` for background work.",
+      content: "No tasks found yet. Use `!task <request>` for background work.",
       reply: { messageReference: message },
     });
     return;
@@ -387,7 +387,7 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
 
   try {
     await report("running", "Background task started.");
-    const manager = SessionManager.create(ALFRED_CWD, `${SESSION_DIR}/tasks/${task.id}`);
+    const manager = SessionManager.create(ALFRED_CWD, `/alfred/state/task-sessions/${task.id}`);
     const { model: bgModel, modelRegistry: bgRegistry } = resolveConfiguredModel();
     const { session: taskSession } = await createAgentSession({
       cwd: ALFRED_CWD,
@@ -633,7 +633,7 @@ async function handleDM(message: Message): Promise<void> {
     return;
   }
 
-  if (content.toLowerCase() === "/new") {
+  if (content.toLowerCase() === "!new") {
     try {
       await getOrCreateSession(true);
       await channel.send({ content: "Started a fresh session.", reply: { messageReference: message } });
@@ -644,7 +644,7 @@ async function handleDM(message: Message): Promise<void> {
   }
 
   const statusArg = parseStatusCommand(content);
-  if (content.toLowerCase().startsWith("/status")) {
+  if (content.toLowerCase().startsWith("!status")) {
     await showTaskStatus(channel, message, statusArg);
     return;
   }
@@ -656,7 +656,7 @@ async function handleDM(message: Message): Promise<void> {
   if (shouldBackground) {
     if (!backgroundPrompt.trim()) {
       await channel.send({
-        content: "Usage: `/task <what to do>`",
+        content: "Usage: `!task <what to do>`",
         reply: { messageReference: message },
       });
       return;

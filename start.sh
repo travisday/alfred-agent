@@ -10,6 +10,22 @@ fi
 # --- Clean macOS resource fork files (accumulate from SSHFS/Finder) ---
 find /alfred -maxdepth 2 -name '._*' -delete 2>/dev/null || true
 
+# --- Migrate tasks.json out of sessions dir (one-time) ---
+if [ -f /alfred/.pi/sessions/discord/tasks.json ] && [ ! -f /alfred/state/discord-tasks.json ]; then
+  mkdir -p /alfred/state
+  mv /alfred/.pi/sessions/discord/tasks.json /alfred/state/discord-tasks.json
+  echo "Migrated tasks.json to /alfred/state/discord-tasks.json"
+fi
+
+# --- Clean up ephemeral sessions (>2 days old) ---
+find /alfred/.pi/sessions -name "*.jsonl" -mtime +2 -delete 2>/dev/null || true
+find /alfred/.pi/sessions -type d -empty -delete 2>/dev/null || true
+find /alfred/state/task-sessions -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+echo "Cleaned stale sessions"
+
+# --- Remove stale AGENTS.md from volume (agent behavior now lives in .pi/SYSTEM.md) ---
+rm -f /alfred/AGENTS.md 2>/dev/null || true
+
 # --- Sync .pi/ config from Docker image into the volume ---
 if [ -d /opt/alfred-pi-config ]; then
   mkdir -p /alfred/.pi
@@ -24,9 +40,11 @@ if [ -d /opt/proactive ]; then
   for f in /opt/proactive/*.sh /opt/proactive/*.md; do
     [ -f "$f" ] && cp -a "$f" /alfred/proactive/
   done
-  # Prompts are user content — seed once, never overwrite
-  if [ ! -d /alfred/proactive/prompts ]; then
-    mkdir -p /alfred/proactive/prompts
+  # Prompts are version-gated — re-seed when repo version is newer
+  PROMPT_VERSION=2
+  mkdir -p /alfred/proactive/prompts
+  current_version=$(cat /alfred/proactive/prompts/.version 2>/dev/null || echo "0")
+  if [ "$current_version" -lt "$PROMPT_VERSION" ] 2>/dev/null; then
     cat > /alfred/proactive/prompts/morning.md << 'PROMPT_EOF'
 # Morning check-in
 
@@ -35,7 +53,7 @@ You are running as a scheduled proactive check-in (not a user-initiated conversa
 **Steps:**
 
 1. **Read memory** (`/alfred/memory/`) — load active goals, commitments, habits, deadlines, and any carry-forward items from yesterday. This is your source of truth for what matters.
-1.5. **Enforce freshness** — Check `Last updated` dates on state files. If `active-context.md` is >3 days old, treat session notes as stale and say so. If any task in `tasks.md` is >7 days past its due date, include a direct "reschedule or drop?" nudge for each one. Don't silently carry stale items forward.
+1.5. **Check task health** — If any task in `tasks.md` is >7 days past its due date, include a "reschedule or drop?" nudge.
 2. **Pull today's calendar** — use `get_today_events`. Also use `get_upcoming` to see what's ahead this week.
 3. **Analyze the day's shape** — How much open time exists vs meetings? Does today's schedule support their stated goals, or is it all reactive? Flag conflicts, back-to-backs, or impossible stacks.
 4. **Cross-reference goals vs reality** — Which goals have open time allocated today? Which are at risk of slipping? Has anything from memory been dormant for days?
@@ -133,7 +151,8 @@ You are running as a scheduled weekly review (not a user-initiated conversation)
 - Do update files for mechanical fixes (archival, pointer sync, stale date correction).
 - If everything is clean, send a short "all clear" note — confirms the review ran.
 PROMPT_EOF
-    echo "Seeded default proactive prompts in /alfred/proactive/prompts/"
+    echo "$PROMPT_VERSION" > /alfred/proactive/prompts/.version
+    echo "Seeded proactive prompts (v${PROMPT_VERSION}) in /alfred/proactive/prompts/"
   fi
   echo "Synced proactive scripts into workspace"
 fi
