@@ -214,7 +214,7 @@ run_maintenance_tick() {
   set +e
   (
     cd /alfred || exit 1
-    pi -p --continue --session-dir /alfred/.pi/sessions/discord --mode json \
+    pi -p --no-session --mode json \
       --thinking "$THINKING" \
       --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
       "@${prompt}" 2>&1

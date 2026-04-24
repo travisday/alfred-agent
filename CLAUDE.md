@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Alfred Agent is a personal AI assistant deployed on Railway in Docker. It wraps the [Pi coding agent](https://github.com/nicholasgriffintn/pi-coding-agent) with custom extensions, a Discord DM bridge, and a proactive scheduled check-in system. Access is via SSH over Tailscale or Discord DMs.
+Alfred Agent is a personal AI assistant deployed on Railway in Docker. It wraps the [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) with custom extensions, a Discord DM bridge, and a proactive scheduled check-in system. Access is via SSH over Tailscale or Discord DMs.
 
 ## Architecture
 

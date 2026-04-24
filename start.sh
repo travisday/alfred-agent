@@ -138,31 +138,29 @@ PROMPT_EOF
   echo "Synced proactive scripts into workspace"
 fi
 
-# --- Seed maintenance prompt individually (works on existing deployments) ---
-if [ ! -f /alfred/proactive/prompts/maintenance.md ]; then
-  mkdir -p /alfred/proactive/prompts
-  cat > /alfred/proactive/prompts/maintenance.md << 'PROMPT_EOF'
+# --- Maintenance prompt (repo-owned, always overwrite) ---
+mkdir -p /alfred/proactive/prompts
+cat > /alfred/proactive/prompts/maintenance.md << 'PROMPT_EOF'
 # Maintenance tick
 
-You are running as a scheduled maintenance check (not user-initiated). Your job is system hygiene: detect drift, fix staleness, verify consistency.
+You are running as a scheduled silent maintenance job (not user-initiated). Your job is system hygiene: detect drift, fix staleness, verify consistency. **This is a background cleanup task — do NOT send any Discord messages or notify the user.**
 
 **Steps:**
 
 1. **Check memory freshness** — Read `state/active-context.md` and `state/today.md`. Check `Last updated` dates. If active-context is >3 days stale, update `Last updated` and add a note: "Stale — no recent session updates."
-2. **Check journal health** — Read last 5 entries of `memory/journal.jsonl`. If no entries in the past 3 days, note the gap.
-3. **Audit overdue tasks** — Read `tasks.md`. Any task >7 days past due should be flagged.
-4. **Verify index pointers** — Read `memory/index.md`. For each project, verify the status description is plausible (don't read project files unless something looks clearly wrong).
-5. **Read recent proactive logs** — `bash` to read last 50 lines of `/alfred/state/proactive-morning.log`, `proactive-midday.log`, `proactive-evening.log`. Look for recurring errors or tool failures.
+2. **Check journal health** — Read last 5 entries of `memory/journal.jsonl`. If no entries in the past 3 days, note the gap in a log line.
+3. **Audit overdue tasks** — Read `tasks.md`. Any task >7 days past due: update its status annotation (e.g., add "⚠ overdue" if not already present). Do NOT delete or reschedule tasks — that's the user's decision during check-ins.
+4. **Verify index pointers** — Read `memory/index.md`. For each project, verify the status description is plausible. Fix obviously stale pointers silently.
+5. **Read recent proactive logs** — `bash` to read last 50 lines of `/alfred/state/proactive-morning.log`, `proactive-midday.log`, `proactive-evening.log`. Note any recurring errors.
 6. **Fix what you can** — Update stale dates, correct obvious pointer mismatches. Keep changes minimal and mechanical.
-7. **Report only if needed** — If you found significant problems (>2 stale items, recurring errors, journal gaps >5 days), call `send_discord_message` with a brief alert. Otherwise, **do not send a Discord message**.
 
 **Rules:**
+- **NEVER call `send_discord_message`.** This is a silent background job. No notifications.
 - Max 2 minutes of work. Don't read project files unless pointers are clearly broken.
 - Don't restructure or reorganize. Only fix staleness and mechanical issues.
-- If Discord isn't configured or nothing is wrong, just output "Maintenance complete. No issues." as plain text.
+- Output "Maintenance complete." as plain text when done, optionally listing what was fixed.
 PROMPT_EOF
-  echo "Seeded maintenance prompt in /alfred/proactive/prompts/maintenance.md"
-fi
+echo "Updated maintenance prompt in /alfred/proactive/prompts/maintenance.md"
 
 # --- Load /alfred/config.env (user preferences on the volume) ---
 # Simple KEY=VALUE parser — Railway env vars always override.
