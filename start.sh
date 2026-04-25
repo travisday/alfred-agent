@@ -99,6 +99,8 @@ proactive/
 # Ephemeral / operational state
 state/proactive-slots.state
 state/proactive-*.log
+state/proactive.log
+state/proactive.lock
 state/task-sessions/
 state/discord-tasks.json
 
