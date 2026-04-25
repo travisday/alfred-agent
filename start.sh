@@ -130,15 +130,13 @@ else
 fi
 
 # --- Unify timezone ---
-if [ -n "${TIMEZONE:-}" ]; then
-  : "${PROACTIVE_TZ:=$TIMEZONE}"
-  : "${CALDAV_TIMEZONE:=$TIMEZONE}"
-  : "${TZ:=$TIMEZONE}"
-  export PROACTIVE_TZ CALDAV_TIMEZONE TZ
-elif [ -n "${PROACTIVE_TZ:-}" ]; then
-  : "${TZ:=$PROACTIVE_TZ}"
-  export TZ
-fi
+# Export TZ for every child process. Without this, Discord/Pi sessions can
+# fall back to UTC even while the proactive scheduler uses Pacific time.
+EFFECTIVE_TZ="${TIMEZONE:-${PROACTIVE_TZ:-${TZ:-America/Los_Angeles}}}"
+: "${PROACTIVE_TZ:=$EFFECTIVE_TZ}"
+: "${CALDAV_TIMEZONE:=$EFFECTIVE_TZ}"
+TZ="$EFFECTIVE_TZ"
+export PROACTIVE_TZ CALDAV_TIMEZONE TZ
 
 # --- Default model ---
 # ALFRED_MODEL is the single knob for model selection across all channels.
