@@ -75,7 +75,7 @@ With `PROACTIVE_ENABLED=1`, Alfred runs three daily check-ins at configurable ti
 1. **Clone** — `git clone https://github.com/travisday/alfred-agent.git`
 2. **Deploy to Railway** — new project → deploy from GitHub → auto-detects Dockerfile
 3. **Add a volume** — mount `alfred-data` at `/alfred`
-4. **Set env vars** — `TS_AUTHKEY`, `RAILWAY_RUN_UID=0`, and at least one LLM API key
+4. **Set env vars** — see [`.env.example`](.env.example) for the full list; at minimum set `TS_AUTHKEY`, `RAILWAY_RUN_UID=0`, and one LLM API key
 5. **Connect** — `tailscale ssh root@alfred` then `cd /alfred && pi`
 
 See the [deployment guide](docs/deployment.md) for full instructions.
@@ -84,6 +84,7 @@ See the [deployment guide](docs/deployment.md) for full instructions.
 
 | Guide | Contents |
 |-------|----------|
+| [`.env.example`](.env.example) | Complete env var reference — secrets, preferences, defaults |
 | [Setup](docs/setup.md) | Tailscale, LLM keys, CalDAV, Discord, Tavily, proactive check-ins |
 | [Configuration](docs/configuration.md) | `config.env` reference, env var table, timezone, rollback |
 | [Deployment](docs/deployment.md) | Clone, Railway deploy, volume, workspace seeding, system prompt |

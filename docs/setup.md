@@ -28,6 +28,8 @@ The `start.sh` script automatically detects whichever API keys you set and confi
 
 > **Tip:** You can set multiple provider keys at once. The startup script builds `auth.json` with all detected providers, so you can switch between models at runtime using Pi's `/model` command.
 
+> For the complete list of all environment variables, see [`.env.example`](../.env.example) in the repo root.
+
 ## 3. CalDAV (optional — Apple Calendar)
 
 Set `CALDAV_APP_PASSWORD` in Railway. Put the non-secret settings in `/alfred/config.env`:

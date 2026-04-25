@@ -1,6 +1,6 @@
 # Configuration
 
-Alfred separates **secrets** (Railway env vars) from **preferences** (`/alfred/config.env` on the volume).
+Alfred separates **secrets** (Railway env vars) from **preferences** (`/alfred/config.env` on the volume). For the complete list of every variable, see [`.env.example`](../.env.example) in the repo root.
 
 ## How it works
 
@@ -36,21 +36,24 @@ Changes take effect on the next container restart.
 ## `/alfred/config.env` reference
 
 ```env
-# /alfred/config.env — Alfred preferences
-# Railway env vars always override these values.
-# Uncomment and edit any line to customize.
+# /alfred/config.env — Runtime preferences
+# Edit this file to customize Alfred without redeploying.
+# Platform env vars (Railway, Docker) always override these values.
+# See .env.example in the repo for the complete variable reference.
 
-# --- Timezone (IANA) ---
+# --- General ---
 # TIMEZONE=America/Los_Angeles
+# ALFRED_MODEL=                    # provider/model-id (e.g. anthropic/claude-sonnet-4-5-20250929)
 
 # --- Proactive check-ins ---
 # PROACTIVE_SCHEDULE=8:00,12:00,18:00
-# PROACTIVE_MODEL=groq/openai/gpt-oss-20b
+# PROACTIVE_MODEL=                 # Override model for check-ins (falls back to ALFRED_MODEL)
 # PROACTIVE_THINKING=off
 # PROACTIVE_POLL_SECS=300
+# PROACTIVE_MAX_RETRIES=0
 
 # --- Discord ---
-# DISCORD_DM_POLICY=open
+# DISCORD_DM_POLICY=open           # open | owner_only | allowlist
 # DISCORD_OWNER_USER_ID=
 # DISCORD_PROACTIVE_USER_ID=
 # DISCORD_ALLOWED_USER_IDS=
@@ -63,9 +66,6 @@ Changes take effect on the next container restart.
 # --- CalDAV (Apple Calendar) ---
 # CALDAV_SERVER_URL=https://caldav.icloud.com
 # CALDAV_USERNAME=
-
-# --- Proactive root (default runtime path) ---
-# PROACTIVE_ROOT=/alfred/proactive
 ```
 
 ## Rollback
@@ -94,3 +94,5 @@ Only secrets and infrastructure toggles belong in Railway. Set these in your Rai
 > You need **at least one** LLM API key. You can set multiple to switch between providers at runtime.
 >
 > All other preferences (timezone, schedule, Discord user IDs, timeouts, CalDAV server URL, etc.) go in `/alfred/config.env` on the volume. See the reference above.
+>
+> For the complete list of every environment variable (secrets + preferences + advanced), see [`.env.example`](../.env.example) in the repo root.

@@ -27,6 +27,7 @@ alfred-agent/
 │   └── append-discord-mandatory.md
 ├── Dockerfile                # Multi-stage: Node 22, Tailscale, Pi, extensions, bridge
 ├── start.sh                  # Container entrypoint (Tailscale, SSH, bridge, scheduler)
+├── .env.example              # Complete deployer reference (all env vars)
 └── config.env.template       # User preferences template (lives on /alfred volume)
 ```
 
