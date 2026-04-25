@@ -192,36 +192,6 @@ function parseStatusCommand(content: string): string | null {
   return content.slice("!status".length).trim() || null;
 }
 
-function isLikelyLongRunningTask(content: string): boolean {
-  const c = content.toLowerCase();
-  const keywords = [
-    "sub agent",
-    "sub-agent",
-    "subagent",
-    "spawn agent",
-    "launch agent",
-    "launch a sub agent",
-    "need to read",
-    "read files",
-    "look up",
-    "search the repo",
-    "investigate",
-    "analyze",
-    "audit my",
-    "when it's done",
-    "when its done",
-    "let me know when done",
-    "run tests",
-    "full refactor",
-    "debug this project",
-    "fix all",
-    "scan the repo",
-    "implement",
-    "deploy",
-  ];
-  return keywords.some((k) => c.includes(k));
-}
-
 function buildForegroundPrompt(content: string): string {
   return [
     `If this request requires extensive research, multi-file scanning, or long-running operations, respond with exactly: ${BACKGROUND_REQUIRED_TOKEN}`,
@@ -425,13 +395,16 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
     }
 
     // Fallback: if events didn't capture text, extract from session messages
+    // Search all assistant messages in reverse — last msg may only have tool_use blocks
     if (!lastAssistantText) {
       const msgs = taskSession.messages as { role?: string; content?: unknown }[];
-      const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
-      if (lastAssistant) {
-        lastAssistantText = extractTextFromMessage(lastAssistant);
-        if (lastAssistantText) {
+      for (const m of [...msgs].reverse()) {
+        if (m.role !== "assistant") continue;
+        const text = extractTextFromMessage(m);
+        if (text) {
+          lastAssistantText = text;
           console.log("[Discord bridge]", taskCtx, "BG: Recovered text from session messages");
+          break;
         }
       }
     }
@@ -527,25 +500,31 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
     // Fallback: if events didn't capture text, extract from session messages directly
     if (!lastAssistantText) {
       const msgs = s.messages as { role?: string; content?: unknown }[];
-      const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
-      if (lastAssistant) {
-        lastAssistantText = extractTextFromMessage(lastAssistant);
-        if (lastAssistantText) {
+      // Search all assistant messages in reverse order (not just the last one)
+      // because the last message may only have tool_use blocks
+      const assistantMsgs = [...msgs].reverse().filter((m) => m.role === "assistant");
+      for (const assistantMsg of assistantMsgs) {
+        const text = extractTextFromMessage(assistantMsg);
+        if (text) {
+          lastAssistantText = text;
           console.log("[Discord bridge]", taskCtx, "Recovered text from session messages (events missed it)");
-        } else {
-          // Log content block types for debugging
-          const content = lastAssistant.content;
+          break;
+        }
+      }
+      if (!lastAssistantText) {
+        if (assistantMsgs.length > 0) {
+          const content = assistantMsgs[0].content;
           if (Array.isArray(content)) {
             const types = content
               .filter((b): b is { type: string } => typeof b === "object" && b != null && "type" in b)
               .map((b) => b.type);
-            console.warn("[Discord bridge]", taskCtx, "Assistant message has no text blocks. Content types:", types);
+            console.warn("[Discord bridge]", taskCtx, "No assistant messages have text blocks. Last msg content types:", types);
           } else {
             console.warn("[Discord bridge]", taskCtx, "Assistant message content is not an array:", typeof content);
           }
+        } else {
+          console.warn("[Discord bridge]", taskCtx, "No assistant message found in session messages after prompt");
         }
-      } else {
-        console.warn("[Discord bridge]", taskCtx, "No assistant message found in session messages after prompt");
       }
     }
 
@@ -652,7 +631,7 @@ async function handleDM(message: Message): Promise<void> {
   const taskPrompt = parseTaskCommand(content);
   const forceBackground = taskPrompt !== null;
   const backgroundPrompt = taskPrompt ?? content;
-  const shouldBackground = forceBackground || isLikelyLongRunningTask(content);
+  const shouldBackground = forceBackground;
   if (shouldBackground) {
     if (!backgroundPrompt.trim()) {
       await channel.send({
