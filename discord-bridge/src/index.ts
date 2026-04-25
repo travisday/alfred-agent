@@ -21,8 +21,6 @@ import { sendTaskCompletionCallback } from "./workerClient.js";
 const ALFRED_CWD = "/alfred";
 const SESSION_DIR = "/alfred/.pi/sessions/discord";
 const CHUNK_SIZE = 1900;
-const STREAM_FLUSH_CHARS = 400;
-const STREAM_FLUSH_MS = 2500;
 const DEFAULT_PROMPT_TIMEOUT_MS = 300_000;
 const DEFAULT_TASK_TIMEOUT_MS = 1_800_000;
 const REASSURANCE_INTERVAL_MS = 60_000;
@@ -101,6 +99,20 @@ function extractTextFromMessage(msg: { content?: unknown }): string {
   return "";
 }
 
+function extractAssistantTextFromNewMessages(
+  messages: { role?: string; content?: unknown }[],
+  msgCountBefore: number
+): string {
+  const newMessages = messages.slice(msgCountBefore);
+  const textParts: string[] = [];
+  for (const msg of newMessages) {
+    if (msg.role !== "assistant") continue;
+    const text = extractTextFromMessage(msg);
+    if (text) textParts.push(text);
+  }
+  return textParts.join("\n\n");
+}
+
 function resolveConfiguredModel(): { model?: any; modelRegistry?: ModelRegistry } {
   const alfredModel = (process.env.ALFRED_MODEL ?? "").trim();
   if (!alfredModel) return {};
@@ -132,11 +144,7 @@ async function getOrCreateSession(forceNew = false): Promise<AgentSession> {
     session = null;
   }
 
-  // Reload session from disk before each message so proactive entries are picked up
-  if (session) {
-    session.dispose();
-    session = null;
-  }
+  if (session) return session;
 
   const sessionManager = SessionManager.continueRecent(ALFRED_CWD, SESSION_DIR);
   const { model, modelRegistry } = resolveConfiguredModel();
@@ -324,7 +332,8 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
 
   const wrappedPrompt = [
     "This request is running in background task mode.",
-    "When complete, return a concise summary in your final assistant message.",
+    "IMPORTANT: Your FINAL message MUST contain a plain-text summary of what you did and what you found.",
+    "Do NOT end with only tool calls — always follow up with a text response summarizing the outcome.",
     "Focus on completing the request end-to-end without waiting for further user input.",
     "",
     promptText,
@@ -366,19 +375,7 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
       ...(bgRegistry && { modelRegistry: bgRegistry }),
     });
 
-    let lastAssistantText = "";
-    const unsub = taskSession.subscribe((event: Record<string, unknown>) => {
-      const etype = event.type as string;
-      if (etype === "message_end" && event.message) {
-        const m = event.message as { role?: string; content?: unknown };
-        if (m.role === "assistant") lastAssistantText = extractTextFromMessage(m);
-      }
-      if (etype === "agent_end" && event.messages) {
-        const msgs = event.messages as { role?: string; content?: unknown }[];
-        const last = [...msgs].reverse().find((m) => m.role === "assistant");
-        if (last) lastAssistantText = extractTextFromMessage(last);
-      }
-    });
+    const msgCountBefore = (taskSession.messages as { role?: string; content?: unknown }[]).length;
 
     const promptPromise = taskSession.prompt(wrappedPrompt);
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -388,30 +385,16 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
       }, TASK_TIMEOUT_MS);
     });
 
-    try {
-      await Promise.race([promptPromise, timeoutPromise]);
-    } finally {
-      unsub();
-    }
+    await Promise.race([promptPromise, timeoutPromise]);
 
-    // Fallback: if events didn't capture text, extract from session messages
-    // Search all assistant messages in reverse — last msg may only have tool_use blocks
-    if (!lastAssistantText) {
-      const msgs = taskSession.messages as { role?: string; content?: unknown }[];
-      for (const m of [...msgs].reverse()) {
-        if (m.role !== "assistant") continue;
-        const text = extractTextFromMessage(m);
-        if (text) {
-          lastAssistantText = text;
-          console.log("[Discord bridge]", taskCtx, "BG: Recovered text from session messages");
-          break;
-        }
-      }
-    }
+    const assistantText = extractAssistantTextFromNewMessages(
+      taskSession.messages as { role?: string; content?: unknown }[],
+      msgCountBefore
+    );
 
     taskSession.dispose();
 
-    const summary = (lastAssistantText || "Task completed.").slice(0, 600);
+    const summary = (assistantText.trim() || `Finished working on: ${promptText.slice(0, 200)}`).slice(0, 600);
     await report("completed", summary);
     console.log("[Discord bridge]", taskCtx, "Background task completed");
   } catch (err) {
@@ -454,24 +437,8 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
     }
 
     await channel.sendTyping();
-    let lastAssistantText = "";
 
-    const unsub = s.subscribe((event: Record<string, unknown>) => {
-      const etype = event.type as string;
-      if (etype === "message_end" && event.message) {
-        const m = event.message as { role?: string; content?: unknown };
-        if (m.role === "assistant") lastAssistantText = extractTextFromMessage(m);
-      }
-      if (etype === "turn_end" && event.message) {
-        const m = event.message as { role?: string; content?: unknown };
-        if (m.role === "assistant") lastAssistantText = extractTextFromMessage(m);
-      }
-      if (etype === "agent_end" && event.messages) {
-        const msgs = event.messages as { role?: string; content?: unknown }[];
-        const last = [...msgs].reverse().find((m) => m.role === "assistant");
-        if (last) lastAssistantText = extractTextFromMessage(last);
-      }
-    });
+    const msgCountBefore = (s.messages as { role?: string; content?: unknown }[]).length;
 
     let timeoutId: ReturnType<typeof setTimeout>;
     let reassuranceId: ReturnType<typeof setTimeout>;
@@ -494,41 +461,13 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
     } finally {
       clearTimeout(timeoutId!);
       clearTimeout(reassuranceId!);
-      unsub();
     }
 
-    // Fallback: if events didn't capture text, extract from session messages directly
-    if (!lastAssistantText) {
-      const msgs = s.messages as { role?: string; content?: unknown }[];
-      // Search all assistant messages in reverse order (not just the last one)
-      // because the last message may only have tool_use blocks
-      const assistantMsgs = [...msgs].reverse().filter((m) => m.role === "assistant");
-      for (const assistantMsg of assistantMsgs) {
-        const text = extractTextFromMessage(assistantMsg);
-        if (text) {
-          lastAssistantText = text;
-          console.log("[Discord bridge]", taskCtx, "Recovered text from session messages (events missed it)");
-          break;
-        }
-      }
-      if (!lastAssistantText) {
-        if (assistantMsgs.length > 0) {
-          const content = assistantMsgs[0].content;
-          if (Array.isArray(content)) {
-            const types = content
-              .filter((b): b is { type: string } => typeof b === "object" && b != null && "type" in b)
-              .map((b) => b.type);
-            console.warn("[Discord bridge]", taskCtx, "No assistant messages have text blocks. Last msg content types:", types);
-          } else {
-            console.warn("[Discord bridge]", taskCtx, "Assistant message content is not an array:", typeof content);
-          }
-        } else {
-          console.warn("[Discord bridge]", taskCtx, "No assistant message found in session messages after prompt");
-        }
-      }
-    }
-
-    const textToSend = lastAssistantText.trim();
+    const assistantText = extractAssistantTextFromNewMessages(
+      s.messages as { role?: string; content?: unknown }[],
+      msgCountBefore
+    );
+    const textToSend = assistantText.trim();
     if (textToSend === BACKGROUND_REQUIRED_TOKEN) {
       const bgTask = createTask({ message, channel, notifyOnCompletion: true });
       updateTask(task.id, {
@@ -553,12 +492,12 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
       });
     } else {
       await channel.send({
-        content: "I did not get a response from Alfred. Try again.",
+        content: "I processed that but didn't have anything to say.",
         reply: { messageReference: message },
       });
       updateTask(task.id, {
-        status: "failed",
-        summary: "No response text captured from model output.",
+        status: "completed",
+        summary: "Prompt completed with tool-only output (no text response).",
         completedAt: new Date().toISOString(),
       });
     }
