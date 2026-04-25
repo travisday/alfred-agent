@@ -78,16 +78,15 @@ With `PROACTIVE_ENABLED=1`, Alfred runs three daily check-ins at configurable ti
 4. **Set env vars** — see [`.env.example`](.env.example) for the full list; at minimum set `TS_AUTHKEY`, `RAILWAY_RUN_UID=0`, and one LLM API key
 5. **Connect** — `tailscale ssh root@alfred` then `cd /alfred && pi`
 
-See the [deployment guide](docs/deployment.md) for full instructions.
+See the [setup guide](docs/setup.md) for full instructions.
 
 ## Documentation
 
 | Guide | Contents |
 |-------|----------|
 | [`.env.example`](.env.example) | Complete env var reference — secrets, preferences, defaults |
-| [Setup](docs/setup.md) | Tailscale, LLM keys, CalDAV, Discord, Tavily, proactive check-ins |
-| [Configuration](docs/configuration.md) | `config.env` reference, env var table, timezone, rollback |
-| [Deployment](docs/deployment.md) | Clone, Railway deploy, volume, workspace seeding, system prompt |
+| [Setup](docs/setup.md) | Clone, deploy to Railway, configure integrations, seed workspace |
+| [Configuration](docs/configuration.md) | `config.env` reference, env var table, timezone, GitHub memory syncing |
 | [SSH & Access](docs/ssh-and-access.md) | SSH/SFTP/Tailscale, kernel TUN vs userspace, phone access |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 
