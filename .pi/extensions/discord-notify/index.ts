@@ -7,12 +7,33 @@
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 const DISCORD_API = "https://discord.com/api/v10";
 const CHUNK_SIZE = 1900;
+const EVENT_FILE = process.env.ALFRED_EVENT_FILE?.trim() || "/alfred/state/events.jsonl";
 
 let cachedRecipientId: string | null = null;
 let cachedDmChannelId: string | null = null;
+
+function logEvent(type: string, message: string, details?: Record<string, unknown>): void {
+  try {
+    mkdirSync(dirname(EVENT_FILE), { recursive: true });
+    appendFileSync(
+      EVENT_FILE,
+      JSON.stringify({
+        t: new Date().toISOString(),
+        source: "discord-notify",
+        type,
+        message,
+        ...(details ? { details } : {}),
+      }) + "\n"
+    );
+  } catch {
+    // Delivery should not fail just because introspection logging is unavailable.
+  }
+}
 
 function getBotToken(): string | null {
   const t = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -114,6 +135,7 @@ export default function (pi: ExtensionAPI) {
         const msg =
           "discord-notify is not configured: missing DISCORD_BOT_TOKEN or DISCORD_PROACTIVE_USER_ID / DISCORD_OWNER_USER_ID.";
         console.error(`[discord-notify] ${msg}`);
+        logEvent("discord_send_unconfigured", msg);
         return {
           content: [{ type: "text", text: msg }],
           details: { ok: false },
@@ -121,6 +143,7 @@ export default function (pi: ExtensionAPI) {
       }
       const chunks = chunkText(params.message);
       if (chunks.length === 0) {
+        logEvent("discord_send_empty", "send_discord_message called with an empty message");
         return {
           content: [{ type: "text", text: "Message was empty; nothing sent." }],
           details: { ok: true, chunks: 0 },
@@ -128,9 +151,11 @@ export default function (pi: ExtensionAPI) {
       }
       try {
         const channelId = await getOrCreateDmChannel(r, t);
+        logEvent("discord_send_attempt", `Sending Discord DM in ${chunks.length} chunk(s)`, { chunks: chunks.length });
         for (const chunk of chunks) {
           await sendMessage(channelId, t, chunk);
         }
+        logEvent("discord_send_success", `Sent Discord DM in ${chunks.length} chunk(s)`, { chunks: chunks.length });
         return {
           content: [
             {
@@ -143,6 +168,7 @@ export default function (pi: ExtensionAPI) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`[discord-notify] Discord send failed: ${msg}`);
+        logEvent("discord_send_failed", msg);
         return {
           content: [{ type: "text", text: `Discord send failed: ${msg}` }],
           details: { ok: false },

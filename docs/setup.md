@@ -55,18 +55,18 @@ The bridge creates the Pi session on your first DM (agent on-demand). Conversati
 
 Discord commands:
 
-- `/new` - reset interactive session context.
-- `/task <request>` - run work in background and get a completion DM when done.
-- `/status` - list your most recent task IDs and states.
-- `/status <taskId>` - inspect one task.
+- `!new` - reset interactive session context.
+- `!task <request>` - run work in background and get a completion DM when done.
+- `!status` - list your most recent task IDs and states.
+- `!status <taskId>` - inspect one task.
 
-Background tasks are explicit-first (`/task`), with optional automatic fallback for obviously long-running requests.
+Background tasks are explicit-first (`!task`), with optional automatic fallback for obviously long-running requests.
 
 Discord preferences (DM policy, user IDs, timeouts) go in `/alfred/config.env` — see [Configuration](configuration.md).
 
 ### Proactive check-ins (optional)
 
-Set `PROACTIVE_ENABLED=1` in Railway to run three daily check-ins (default **8:00, 12:00, 18:00** in your `TIMEZONE`). A background script invokes `pi -p` with **thin** prompts from **`/alfred/proactive/prompts/`** (morning, midday, evening)—each slot only adds an agenda; main behavior and context still come from `.pi/SYSTEM.md`, `/alfred/AGENTS.md`, and `/alfred/memory/`. Prompts are seeded on first boot and live on the volume so you can edit them without redeploying. Alfred uses the **`send_discord_message`** tool (discord-notify extension) to DM you a summary via the **same** `DISCORD_BOT_TOKEN` as the bridge (HTTP REST only — no second Gateway connection).
+Set `PROACTIVE_ENABLED=1` in Railway to run three daily check-ins (default **8:00, 12:00, 18:00** in your `TIMEZONE`). A background script invokes `pi -p` with prompts from **`/alfred/proactive/prompts/`** (morning, midday, evening); main behavior comes from `.pi/SYSTEM.md`, and personal context comes from `/alfred/memory/`, `/alfred/state/`, `tasks.md`, and recent journal entries. Prompts are seeded from the `alfred-agent` image when `PROMPT_VERSION` increases. Alfred uses the **`send_discord_message`** tool (discord-notify extension) to DM you a summary via the **same** `DISCORD_BOT_TOKEN` as the bridge (HTTP REST only — no second Gateway connection).
 
 **With `PROACTIVE_ENABLED=1` you need:** `DISCORD_BOT_TOKEN`, a recipient user ID (`DISCORD_PROACTIVE_USER_ID` or `DISCORD_OWNER_USER_ID` in config.env), and at least one LLM API key. The user must have **DMed the bot at least once** so Discord allows outbound DMs to that user.
 
@@ -79,7 +79,7 @@ Proactive preferences (`PROACTIVE_SCHEDULE`, `PROACTIVE_MODEL`, `PROACTIVE_THINK
 | All other `PROACTIVE_*` | config.env | Schedule, model, thinking, poll interval, root directory |
 | `DISCORD_PROACTIVE_USER_ID` | config.env | DM recipient; defaults to `DISCORD_OWNER_USER_ID` |
 
-Scheduler state and logs live under `/alfred/state/` (e.g. `proactive-slots.state`, `proactive-morning.log`).
+Scheduler state and logs live under `/alfred/state/` (e.g. `proactive-slots.state`, `proactive-morning.log`, `events.jsonl`).
 
 #### Testing proactive (Discord + Pi)
 

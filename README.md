@@ -4,7 +4,7 @@ A personal AI assistant that lives on a server — accessible from any device vi
 
 ## What it does
 
-Alfred is a self-hosted executive assistant that runs 24/7 in a Docker container. You SSH in (or DM a Discord bot) and interact with an LLM agent that has persistent memory, calendar access, web search, and scheduled check-ins — all stored on a single volume as plain markdown files. Think of it as your own private ChatGPT with file system state, extensible tools, and proactive outreach.
+Alfred is a self-hosted executive assistant that runs 24/7 in a Docker container. You SSH in (or DM a Discord bot) and interact with an LLM agent that has persistent memory, calendar access, web search, and scheduled check-ins — all stored on a single volume as plain markdown files. `alfred-agent` is the harness; the separate `alfred-memory` repo is the context checkout mounted at `/alfred`.
 
 ## Features
 
@@ -36,8 +36,8 @@ Alfred is a self-hosted executive assistant that runs 24/7 in a Docker container
 │  └────────────────────────┬───────────────────────────────┘ │
 │                           │                                 │
 │  ┌────────────────────────┴───────────────────────────────┐ │
-│  │           /alfred (persistent volume)                  │ │
-│  │     memory/ · projects/ · AGENTS.md · state/           │ │
+│  │           /alfred (persistent memory repo)             │ │
+│  │     memory/ · projects/ · state/ · tasks.md            │ │
 │  └────────────────────────────────────────────────────────┘ │
 │                                                              │
 │  ┌──────────┐  ┌────────┐                                   │
@@ -55,7 +55,7 @@ Alfred is a self-hosted executive assistant that runs 24/7 in a Docker container
 
 ## How it works
 
-Alfred runs the Pi agent on-demand inside the container. State is plain markdown files on a persistent volume — no database. LLM inference is handled by your provider's API (no GPU needed). Tailscale provides a private encrypted network so nothing is exposed to the public internet. Extensions are auto-discovered from `.pi/extensions/` and activate based on which env vars are set.
+Alfred runs the Pi agent on-demand inside the container. State is plain markdown files in `/alfred` — no database. LLM inference is handled by your provider's API (no GPU needed). Tailscale provides a private encrypted network so nothing is exposed to the public internet. Extensions are auto-discovered from `.pi/extensions/` and activate based on which env vars are set.
 
 ## Extensions
 
@@ -68,7 +68,7 @@ Alfred runs the Pi agent on-demand inside the container. State is plain markdown
 
 ## Proactive check-ins
 
-With `PROACTIVE_ENABLED=1`, Alfred runs three daily check-ins at configurable times (default 8:00, 12:00, 18:00). Each check-in reads your memory, calendar, and project state, then DMs you a summary via Discord. Prompts live on the volume at `/alfred/proactive/prompts/` so you can customize them without redeploying.
+With `PROACTIVE_ENABLED=1`, Alfred runs three daily check-ins at configurable times (default 8:00, 12:00, 18:00). Each check-in reads your memory, calendar, and project state, then DMs you a summary via Discord. Default prompts are owned by `alfred-agent` and seeded into `/alfred/proactive/prompts/` when `PROMPT_VERSION` increases.
 
 ## Quick start
 

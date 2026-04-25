@@ -8,13 +8,13 @@ On boot, `start.sh` reads `/alfred/config.env` — a simple `KEY=VALUE` file. Ra
 
 ## Unified timezone
 
-Set `TIMEZONE` once and both the proactive scheduler and CalDAV calendar use it:
+Set `TIMEZONE` once and Alfred exports it as process-wide `TZ`; the proactive scheduler, Discord/Pi child processes, shell dates, and CalDAV calendar all use the same local day:
 
 ```env
 TIMEZONE=America/New_York
 ```
 
-The old per-subsystem vars (`PROACTIVE_TZ`, `CALDAV_TIMEZONE`) still work and override `TIMEZONE` for their subsystem if set.
+The old per-subsystem vars (`PROACTIVE_TZ`, `CALDAV_TIMEZONE`) still work and override `TIMEZONE` for their subsystem if set. If `TIMEZONE` is absent but `PROACTIVE_TZ` is set, boot also exports `TZ=$PROACTIVE_TZ`.
 
 ## Editing config.env
 
@@ -64,8 +64,8 @@ Changes take effect on the next container restart.
 # CALDAV_SERVER_URL=https://caldav.icloud.com
 # CALDAV_USERNAME=
 
-# --- Proactive root (set when you move prompts to the volume) ---
-# PROACTIVE_ROOT=/opt/proactive
+# --- Proactive root (default runtime path) ---
+# PROACTIVE_ROOT=/alfred/proactive
 ```
 
 ## Rollback

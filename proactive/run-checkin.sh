@@ -13,6 +13,9 @@ if [ -f /etc/profile.d/railway-env.sh ]; then
   . /etc/profile.d/railway-env.sh
 fi
 
+TZ="${PROACTIVE_TZ:-${TIMEZONE:-${TZ:-America/Los_Angeles}}}"
+export TZ
+
 VERIFY=false
 if [ "${PROACTIVE_VERIFY:-}" = "1" ] || [ "${PROACTIVE_VERIFY:-}" = "true" ]; then
   VERIFY=true

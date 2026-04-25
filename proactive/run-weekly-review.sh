@@ -14,6 +14,9 @@ if [ -f /etc/profile.d/railway-env.sh ]; then
   . /etc/profile.d/railway-env.sh
 fi
 
+TZ="${PROACTIVE_TZ:-${TIMEZONE:-${TZ:-America/Los_Angeles}}}"
+export TZ
+
 VERIFY=false
 for arg in "$@"; do
   case "$arg" in

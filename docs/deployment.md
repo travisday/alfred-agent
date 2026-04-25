@@ -31,9 +31,9 @@ Add the variables from the [Railway Environment Variables](configuration.md#rail
 
 Hit deploy. Once running, check your [Tailscale admin console](https://login.tailscale.com/admin/machines) — a node called **alfred** should appear.
 
-## Seeding Your Workspace
+## Seeding Your Memory Workspace
 
-On first boot, the `/alfred` volume is empty. You'll want to set up a directory structure and an `AGENTS.md` file for Alfred to use as context.
+On first boot, the `/alfred` volume is empty. This volume should contain Alfred's personal context repo (`alfred-memory`): memory files, state files, project notes, tasks, and journal entries. Agent behavior is supplied by `alfred-agent` and synced into `/alfred/.pi` on boot.
 
 ### Connect to Alfred
 
@@ -49,33 +49,11 @@ Tailscale SSH handles authentication automatically — no SSH keys needed.
 
 ```bash
 cd /alfred
-mkdir -p projects memory
+mkdir -p memory projects reference state
+touch tasks.md
 ```
 
-### Create an `AGENTS.md`
-
-This is the file Pi reads from your workspace directory for project-level context. Create it with whatever instructions make sense for your workflow:
-
-```bash
-cat > /alfred/AGENTS.md << 'EOF'
-# Alfred - Personal Assistant
-
-You are Alfred, a personal assistant. You manage projects and memory
-using markdown files and folders in this directory.
-
-## Directory Structure
-- `/alfred/projects/` - Active project folders, each with their own notes
-- `/alfred/memory/` - Persistent memory and preferences
-
-## Behavior
-- When given a task, check memory/ for relevant context first
-- Save important decisions and preferences to memory/
-- Keep project notes organized in projects/<project-name>/
-- Be concise and direct
-EOF
-```
-
-You can edit `AGENTS.md` at any time — it's read by Pi on each prompt.
+Do not use `/alfred/AGENTS.md` for Alfred behavior. `start.sh` removes stale workspace `AGENTS.md` files on boot so behavior stays owned by `.pi/SYSTEM.md` in the `alfred-agent` repo.
 
 ## Custom System Prompt
 

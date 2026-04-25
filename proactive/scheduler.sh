@@ -19,13 +19,14 @@ PROACTIVE_ROOT="${PROACTIVE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}
 STATE_DIR="${PROACTIVE_STATE_DIR:-/alfred/state}"
 STATE_FILE="${STATE_DIR}/proactive-slots.state"
 LOCK_FILE="${STATE_DIR}/proactive.lock"
+EVENT_FILE="${PROACTIVE_EVENT_FILE:-${STATE_DIR}/events.jsonl}"
 TZ="${PROACTIVE_TZ:-${TIMEZONE:-America/Los_Angeles}}"
 export TZ
 SCHEDULE="${PROACTIVE_SCHEDULE:-8:00,12:00,18:00}"
 SLOT_NAMES=(morning midday evening)
 POLL_SECS="${PROACTIVE_POLL_SECS:-300}"
 THINKING="${PROACTIVE_THINKING:-off}"
-MAX_RETRIES="${PROACTIVE_MAX_RETRIES:-1}"
+MAX_RETRIES="${PROACTIVE_MAX_RETRIES:-0}"
 LOG_PREFIX="[proactive]"
 
 log() {
@@ -33,6 +34,22 @@ log() {
 }
 
 mkdir -p "$STATE_DIR"
+
+log_event() {
+  local type="$1"
+  shift || true
+  local message="$*"
+  mkdir -p "$(dirname "$EVENT_FILE")"
+  EVENT_TYPE="$type" EVENT_MESSAGE="$message" node -e '
+const event = {
+  t: new Date().toISOString(),
+  source: "proactive-scheduler",
+  type: process.env.EVENT_TYPE,
+  message: process.env.EVENT_MESSAGE || ""
+};
+process.stdout.write(JSON.stringify(event) + "\n");
+' >> "$EVENT_FILE" 2>/dev/null || true
+}
 
 get_slot_date() {
   local slot="$1"
@@ -82,7 +99,8 @@ git_commit_if_dirty() {
 }
 
 # --- Run a single check-in with verified Discord delivery ---
-# Returns 0 only if pi succeeds AND "Sent Discord DM" appears in output.
+# Returns 0 if Discord delivery is confirmed, 2 if the run completed but
+# delivery was ambiguous, and 1 for clear failures before delivery.
 run_checkin_verified() {
   local name="$1"
   local prompt="${PROACTIVE_ROOT}/prompts/${name}.md"
@@ -108,18 +126,21 @@ run_checkin_verified() {
   local st="${PIPESTATUS[0]}"
   set -e
 
-  if [ "$st" -ne 0 ]; then
-    log "Check-in failed (exit $st): $name"
-    return 1
-  fi
-
   if grep -q 'Sent Discord DM' "$tmp"; then
     log "Verified check-in: $name — Discord DM confirmed"
+    log_event "checkin_verified" "$name Discord DM confirmed"
     return 0
   fi
 
+  if [ "$st" -ne 0 ]; then
+    log "Check-in failed (exit $st): $name"
+    log_event "checkin_failed" "$name exited $st before Discord delivery was confirmed"
+    return 1
+  fi
+
   log "Check-in ran but Discord DM not confirmed: $name"
-  return 1
+  log_event "checkin_unverified" "$name completed but Discord delivery was not confirmed; suppressing automatic rerun"
+  return 2
 }
 
 # Run check-in with retry on failure.
@@ -127,8 +148,14 @@ run_checkin_with_retry() {
   local name="$1"
   local attempt=0
   while [ "$attempt" -le "$MAX_RETRIES" ]; do
+    local rc
     if run_checkin_verified "$name"; then
       return 0
+    else
+      rc="$?"
+    fi
+    if [ "$rc" -eq 2 ]; then
+      return 2
     fi
     attempt=$((attempt + 1))
     if [ "$attempt" -le "$MAX_RETRIES" ]; then
@@ -148,16 +175,7 @@ run_daily_maintenance() {
   echo "# Today: $(date +%Y-%m-%d)" > /alfred/state/today.md
   echo "" >> /alfred/state/today.md
   log "Reset today.md"
-
-  # Stamp active-context.md with today's date so check-ins see fresh state
-  if [ -f /alfred/state/active-context.md ]; then
-    if grep -q '^Last updated:' /alfred/state/active-context.md; then
-      sed -i "s/^Last updated:.*/Last updated: $(date +%Y-%m-%d)/" /alfred/state/active-context.md
-    else
-      sed -i "1s/^/Last updated: $(date +%Y-%m-%d)\n/" /alfred/state/active-context.md
-    fi
-    log "Stamped active-context.md"
-  fi
+  log_event "daily_today_reset" "Reset state/today.md for $(date +%Y-%m-%d); active-context timestamp left unchanged"
 
   # Reset check-in failure counters from previous day
   if [ -f "$STATE_FILE" ]; then
@@ -300,11 +318,17 @@ while true; do
           set_slot_date "$slot" "$date_part"
           git_commit_if_dirty "auto: check-in $slot $(date +%Y-%m-%dT%H:%M)"
         else
-          local fail_key="_fail_${slot}"
-          local prev_fails
+          checkin_rc="$?"
+          if [ "$checkin_rc" -eq 2 ]; then
+            log "Slot complete (unverified, no automatic rerun): $slot"
+            set_slot_date "$slot" "$date_part"
+            git_commit_if_dirty "auto: check-in unverified $slot $(date +%Y-%m-%dT%H:%M)"
+            continue
+          fi
+          fail_key="_fail_${slot}"
           prev_fails="$(get_slot_date "$fail_key")"
           prev_fails="${prev_fails:-0}"
-          local new_fails=$((prev_fails + 1))
+          new_fails=$((prev_fails + 1))
           if [ "$new_fails" -ge 3 ]; then
             log "ERROR: $slot failed $new_fails times today, giving up"
             set_slot_date "$slot" "$date_part"

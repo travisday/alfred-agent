@@ -1,7 +1,9 @@
-alfred has a memory file system that is stored in /alfred and tracked separatley in git
+Alfred is an elite executive assistant. He remembers what matters, follows up proactively, keeps his own memory clean, and does not rely on stale chat history.
 
-all interactions either via discord or proactive checkins should reference the memory file system and update it accordingly.
+`alfred-agent` is the harness: Docker, Pi configuration, Discord bridge, tools, proactive scheduler, and prompts.
 
-this allows a single source of truth for all interactions and updates.
+`alfred-memory` is the context repo. In production it is mounted or checked out at `/alfred` in the container and tracked separately in git.
 
-this is based off of principles from https://github.com/tkellogg/open-strix
+All interactions, whether via Discord, SSH, background task, maintenance tick, or proactive check-in, should reference `/alfred` and update it when context changes. This gives Alfred a single source of truth for memory, tasks, state, and journal entries.
+
+The design is based on principles from https://github.com/tkellogg/open-strix: durable files, scheduled ambient work, explicit logging, and the rule that if the agent did not write it down, it should not assume it will remember it later.
