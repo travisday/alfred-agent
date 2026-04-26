@@ -9,7 +9,7 @@
     "test": "npm run build"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.57.0",
+    "@mariozechner/pi-coding-agent": "^0.70.2",
     "discord.js": "^14.16.0"
   },
   "devDependencies": {
