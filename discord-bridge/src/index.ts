@@ -42,7 +42,9 @@ const processedMessageIds = new Set<string>();
 
 let session: AgentSession | null = null;
 let processing = false;
-const messageQueue: { message: Message; content: string }[] = [];
+type MessageQueueItem = { message: Message; content: string; channel: DMChannel };
+
+const messageQueue: MessageQueueItem[] = [];
 const completionRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function getTaskWebhookSecret(): string | null {
@@ -457,7 +459,7 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
 
 async function handleForegroundTask(message: Message, channel: DMChannel, content: string): Promise<void> {
   if (processing) {
-    messageQueue.push({ message, content });
+    messageQueue.push({ message, content, channel });
     await channel.send({
       content: "Got it. I queued this and will respond after the current request.",
       reply: { messageReference: message },
