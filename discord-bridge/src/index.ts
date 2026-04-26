@@ -65,8 +65,18 @@ function isTerminalTaskStatus(status: string): boolean {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 
+function sanitizeErrorMessage(msg: string): string {
+  // Remove ANSI color codes and other terminal escapes
+  return msg.replace(/\x1b\[[0-9;]*m/g, "")
+            .replace(/\[\d+m/g, "")
+            .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
+            .trim();
+}
+
 function formatErrorForUser(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err);
+  const rawMsg = err instanceof Error ? err.message : String(err);
+  const msg = sanitizeErrorMessage(rawMsg);
+
   if (msg.includes("timed out") || msg.includes("timeout")) {
     return "That took too long. Try a simpler question or try again.";
   }
@@ -82,6 +92,19 @@ function formatErrorForUser(err: unknown): string {
   if (msg.includes("network") || msg.includes("ECONNREFUSED") || msg.includes("ENOTFOUND")) {
     return "Network error. Alfred will retry when you send another message.";
   }
+  if (msg.includes("failed_generation") || msg.includes("adjust your prompt")) {
+    console.error("[Discord bridge] Original failed_generation error:", rawMsg);
+    return "The agent encountered an internal error. Please try rephrasing your request.";
+  }
+  if (msg.includes("context length") || msg.includes("context window") || msg.includes("max tokens")) {
+    return "This request is too long. Try breaking it into smaller parts.";
+  }
+  // Catch cryptic or truncated errors (very short messages or suspicious patterns like "ae adjust")
+  if (msg.length < 15 || /\b[a-z]{1,2}\s+adjust\b/i.test(msg)) {
+    console.error("[Discord bridge] Cryptic error detected, original:", rawMsg);
+    return "The agent encountered an unexpected error. Please try again.";
+  }
+
   return msg.length > 200 ? `${msg.slice(0, 200)}...` : msg;
 }
 
@@ -450,6 +473,7 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
 
   try {
     const s = await getOrCreateSession();
+    console.log("[Discord bridge]", taskCtx, "Session acquired, streaming:", s.isStreaming, "messages:", s.messages.length);
     if (s.isStreaming) {
       updateTask(task.id, {
         status: "failed",

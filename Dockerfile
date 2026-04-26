@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
 RUN curl -fsSL https://tailscale.com/install.sh | sh
 
 # Install Pi coding agent globally
-RUN npm install -g @mariozechner/pi-coding-agent
+RUN npm install -g @mariozechner/pi-coding-agent@latest
 
 # Create workspace directory (will be mounted as a volume)
 RUN mkdir -p /alfred
