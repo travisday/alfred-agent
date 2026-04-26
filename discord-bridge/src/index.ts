@@ -755,6 +755,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const alfredModel = process.env.ALFRED_MODEL ?? "";
+  console.log(`[Discord bridge] ALFRED_MODEL env: "${alfredModel || '(not set)'}"`);
+
   const recoveredCount = recoverNonTerminalTasks();
   if (recoveredCount > 0) {
     console.warn(`[Discord bridge] Recovered ${recoveredCount} non-terminal tasks after restart.`);

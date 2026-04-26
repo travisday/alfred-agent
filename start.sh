@@ -56,7 +56,8 @@ if [ -d /opt/proactive ]; then
 fi
 
 # --- Load /alfred/config.env (user preferences on the volume) ---
-# Simple KEY=VALUE parser — Railway env vars always override.
+# Simple KEY=VALUE parser — Railway env vars always override for secrets.
+# Preference vars (TIMEZONE, ALFRED_MODEL, etc.) allow config.env to override empty values.
 apply_config() {
   local file="$1"
   [ -f "$file" ] || return 0
@@ -70,8 +71,18 @@ apply_config() {
     [ -z "$line" ] && continue
     local key="${line%%=*}"
     local val="${line#*=}"
-    # Only apply if not already set in the environment (Railway wins)
-    if [ -z "${!key+x}" ]; then
+    # For preference vars, allow config.env to override empty values
+    # For secrets/keys, Railway env always wins
+    local is_pref=0
+    case "$key" in
+      TIMEZONE|PROACTIVE_TZ|CALDAV_TIMEZONE|ALFRED_MODEL|PROACTIVE_MODEL)
+        is_pref=1 ;;
+    esac
+    if [ "$is_pref" = "1" ] && [ -z "${!key:-}" ]; then
+      # Preference var is empty or unset → apply from config.env
+      export "$key=$val"
+    elif [ -z "${!key+x}" ]; then
+      # Secret var is completely unset → apply from config.env
       export "$key=$val"
     fi
   done < "$file"
@@ -148,6 +159,8 @@ export PROACTIVE_TZ CALDAV_TIMEZONE TZ
 if [ -n "${ALFRED_MODEL:-}" ]; then
   export ALFRED_MODEL
   echo "Default model: $ALFRED_MODEL"
+else
+  echo "Default model: (not set, will use provider default)"
 fi
 
 # --- Tailscale ---
