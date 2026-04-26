@@ -11,8 +11,9 @@ echo ""
 
 for file in "$BLOCKSDIR"/*.yaml; do
   [ -f "$file" ] || continue
-  name=$(basename "$file" .yaml | sed 's/_/ / /g')
-  echo "## ${name^}"
+  # sed: underscores → spaces; awk: capitalize first letter (portable vs bash ${name^})
+  display_name=$(basename "$file" .yaml | sed 's/_/ /g' | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+  echo "## ${display_name}"
   echo '```yaml'
   cat "$file"
   echo '```'

@@ -36,6 +36,20 @@
 - Enable **Message Content Intent** in the Discord Developer Portal
 - Check deploy logs for "Discord bridge started"
 
+## Discord shows: `400 checking third-party user token ... Personal Access Tokens are not supported`
+
+That text is **not from Discord**. It is from **GitHub Copilot’s API** (or another GitHub “third-party” gate): something in the Pi/LLM stack is calling Copilot with a **GitHub Personal Access Token**, which that endpoint rejects.
+
+**What to do**
+
+1. In Railway, set an explicit model so Pi does not fall through to a bad default, e.g. `ALFRED_MODEL=groq/llama-3.3-70b-versatile` (or another provider/model you have a real key for in `auth.json`).
+2. Do **not** put a GitHub PAT in `OPENAI_API_KEY` (or any LLM key slot) expecting Copilot to work — Copilot needs its **own** auth flow in Pi, not a repo PAT.
+3. If you use **GitHub Copilot** with Pi, follow Pi’s current Copilot setup; otherwise prefer **GROQ / Anthropic / OpenAI / Gemini** keys as in `.env.example`.
+
+## `WARNING: memory-loader failed; omitted APPEND_SYSTEM.md`
+
+- Usually means `/alfred/memory-loader.sh` exited non-zero (for example a script bug, missing `blocks/`, or non-executable script). After deploy, check `ls -la /alfred/blocks /alfred/memory-loader.sh` and run `/alfred/memory-loader.sh` once by hand to see the error.
+
 ## Discord task finished but no completion DM
 
 - Set `TASK_WEBHOOK_SECRET` so signed task callbacks and completion notifications are enabled
