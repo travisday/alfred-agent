@@ -80,10 +80,10 @@ apply_config() {
     esac
     if [ "$is_pref" = "1" ] && [ -z "${!key:-}" ]; then
       # Preference var is empty or unset → apply from config.env
-      export "$key=$val"
+      declare -gx "$key=$val"
     elif [ -z "${!key+x}" ]; then
       # Secret var is completely unset → apply from config.env
-      export "$key=$val"
+      declare -gx "$key=$val"
     fi
   done < "$file"
 }
