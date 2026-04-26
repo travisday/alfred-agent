@@ -175,7 +175,7 @@ function resolveConfiguredModel(): { model?: any; modelRegistry?: ModelRegistry 
   const provider = alfredModel.slice(0, slashIdx);
   const modelId = alfredModel.slice(slashIdx + 1);
   const authStorage = AuthStorage.create();
-  const modelRegistry = new ModelRegistry(authStorage);
+  const modelRegistry = ModelRegistry.create(authStorage);
   const model = modelRegistry.find(provider, modelId);
 
   if (model) {
