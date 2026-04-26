@@ -99,18 +99,47 @@ function extractTextFromMessage(msg: { content?: unknown }): string {
   return "";
 }
 
-function extractAssistantTextFromNewMessages(
-  messages: { role?: string; content?: unknown }[],
-  msgCountBefore: number
-): string {
-  const newMessages = messages.slice(msgCountBefore);
+/**
+ * Collect assistant text from the most recent turn.
+ * Anchors on the last user message so auto-compaction can't invalidate indices.
+ * Also surfaces agent errors that session.prompt() silently swallows.
+ */
+function extractLastTurnAssistantText(
+  messages: { role?: string; content?: unknown; errorMessage?: string }[]
+): { text: string; error?: string } {
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  if (lastUserIdx === -1) {
+    console.warn("[Discord bridge] extractLastTurnAssistantText: no user message found");
+    return { text: "" };
+  }
+
   const textParts: string[] = [];
-  for (const msg of newMessages) {
+  let lastError: string | undefined;
+  for (let i = lastUserIdx + 1; i < messages.length; i++) {
+    const msg = messages[i];
     if (msg.role !== "assistant") continue;
     const text = extractTextFromMessage(msg);
     if (text) textParts.push(text);
+    if (msg.errorMessage) lastError = msg.errorMessage;
   }
-  return textParts.join("\n\n");
+
+  const joined = textParts.join("\n\n");
+  if (!joined && lastError) {
+    console.error("[Discord bridge] Agent error (no text):", lastError);
+  } else if (!joined) {
+    // Debug: dump what we actually see so we can diagnose next time
+    const afterUser = messages.slice(lastUserIdx + 1);
+    const summary = afterUser.map((m) => `${m.role ?? "?"}${m.errorMessage ? "[err]" : ""}`).join(", ");
+    console.warn("[Discord bridge] No assistant text found. Messages after user:", summary || "(none)");
+  }
+
+  return { text: joined, error: !joined ? lastError : undefined };
 }
 
 function resolveConfiguredModel(): { model?: any; modelRegistry?: ModelRegistry } {
@@ -375,8 +404,6 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
       ...(bgRegistry && { modelRegistry: bgRegistry }),
     });
 
-    const msgCountBefore = (taskSession.messages as { role?: string; content?: unknown }[]).length;
-
     const promptPromise = taskSession.prompt(wrappedPrompt);
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
@@ -387,10 +414,10 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
 
     await Promise.race([promptPromise, timeoutPromise]);
 
-    const assistantText = extractAssistantTextFromNewMessages(
-      taskSession.messages as { role?: string; content?: unknown }[],
-      msgCountBefore
+    const { text: assistantText, error: agentError } = extractLastTurnAssistantText(
+      taskSession.messages as { role?: string; content?: unknown; errorMessage?: string }[]
     );
+    if (agentError) throw new Error(agentError);
 
     taskSession.dispose();
 
@@ -438,8 +465,6 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
 
     await channel.sendTyping();
 
-    const msgCountBefore = (s.messages as { role?: string; content?: unknown }[]).length;
-
     let timeoutId: ReturnType<typeof setTimeout>;
     let reassuranceId: ReturnType<typeof setTimeout>;
 
@@ -463,10 +488,11 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
       clearTimeout(reassuranceId!);
     }
 
-    const assistantText = extractAssistantTextFromNewMessages(
-      s.messages as { role?: string; content?: unknown }[],
-      msgCountBefore
+    const { text: assistantText, error: agentError } = extractLastTurnAssistantText(
+      s.messages as { role?: string; content?: unknown; errorMessage?: string }[]
     );
+    if (agentError) throw new Error(agentError);
+
     const textToSend = assistantText.trim();
     if (textToSend === BACKGROUND_REQUIRED_TOKEN) {
       const bgTask = createTask({ message, channel, notifyOnCompletion: true });
