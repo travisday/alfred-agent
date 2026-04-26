@@ -30,7 +30,7 @@ Only secrets and infrastructure toggles belong in Railway. Set these in your Rai
 
 > You need **at least one** LLM API key. You can set multiple to switch between providers at runtime.
 >
-> All other preferences (timezone, schedule, Discord user IDs, timeouts, CalDAV server URL, etc.) go in `/alfred/config.env` on the volume. See the reference below.
+> All other preferences (timezone, schedule, Discord user IDs, timeouts, CalDAV server URL, etc.) go in `/alfred/config.env` on the volume. See reference below.
 >
 > For the complete list of every environment variable (secrets + preferences + advanced), see [`.env.example`](../.env.example) in the repo root.
 
@@ -81,7 +81,7 @@ vi /alfred/config.env
 Or via SSHFS (mount with `noappledouble` to prevent macOS `._*` resource fork files):
 
 ```bash
-sshfs root@alfred:/alfred ~/alfred -o noappledouble,reconnect,follow_symlinks
+sshfs root@alfred:/alfred ~/alfred -onoappledouble,reconnect,follow_symlinks
 ```
 
 Changes take effect on the next container restart.
@@ -96,6 +96,30 @@ TIMEZONE=America/New_York
 
 The old per-subsystem vars (`PROACTIVE_TZ`, `CALDAV_TIMEZONE`) still work and override `TIMEZONE` for their subsystem if set. If `TIMEZONE` is absent but `PROACTIVE_TZ` is set, boot also exports `TZ=$PROACTIVE_TZ`.
 
+## Memory system (separate repo: alfred-memory)
+
+Alfred uses a structural memory system:
+
+```
+alfred-memory/
+├── blocks/              # ALWAYS-IN-PROMPT YAML
+│   ├── identity.yaml      # Who the user is, current focus
+│   ├── preferences.yaml    # Communication style, workflow
+│   ├── goals.yaml         # Current goals and status
+│   └── patterns.yaml      # Recurring commitments, habits
+├── state/               # ON-DEMAND MARKDOWN
+│   ├── projects/         # Project-specific content, read when needed
+│   ├── active-context.md   # Initiatives, session notes
+│   └── today.md          # Daily priorities (auto-sets)
+├── logs/                # APPEND-ONLY JSONL
+│   ├── events.jsonl       # Operational events
+│   └── journal.jsonl      # Session history
+├── tasks.md              # Discrete tasks with due dates
+└── tasks-archive.md       # Completed tasks (>3 days old)
+```
+
+Key principle: Always-on vs on-demand is structural — different directories, explicit. `blocks/*.yaml` are loaded at every turn via `memory-loader.sh`. Everything else is read on demand.
+
 ## GitHub memory syncing
 
 Alfred can automatically commit and push changes in the `/alfred` memory volume to a private GitHub repo. This gives you off-site backup and a full history of how your workspace evolves.
@@ -109,20 +133,20 @@ The proactive scheduler runs `git add -A && git commit && git push` after each e
 - 2-hour maintenance ticks
 - Weekly reviews
 
-Each commit gets a descriptive message like `auto: check-in morning 2025-04-24T08:05` or `auto: daily maintenance 2025-04-24T07:58`.
+Each commit gets a descriptive message like `auto: check-in morning 2025-04-24T08:05:00` or `auto: daily maintenance 2025-04-24T07:58:00`.
 
 ### What gets tracked vs. gitignored
 
 `start.sh` writes a `.gitignore` on every boot. Only your personal data is committed:
 
 | Tracked | Gitignored |
-|---------|------------|
-| `memory/` | `.pi/` (synced from image on boot) |
-| `projects/` | `proactive/` (synced from image on boot) |
-| `tasks.md`, `tasks-archive.md` | `.tailscale/` |
-| `state/today.md`, `state/active-context.md` | `state/proactive-*.log`, `state/proactive.lock` |
-| `config.env` | `state/proactive-slots.state` |
-| `reference/` | `state/task-sessions/`, `state/discord-tasks.json` |
+|----------|------------|
+| `blocks/` | `.pi/` (synced from image on boot) |
+| `state/` | `proactive/` (synced from image on boot) |
+| `logs/` | `.tailscale/` |
+| `tasks.md`, `tasks-archive.md` | `config.env` |
+| `proactive-slots.state`, `proactive*.log`, `proactive.lock` | `state/task-sessions/`, `state/discord-tasks.json` |
+| `state/proactive-slots.state` | `state/proactive-*.log` |
 | journal entries | `.DS_Store`, `._*` |
 
 ### Setting up GitHub push
@@ -170,12 +194,12 @@ git push origin main
 
 The scheduler logs a warning (`WARNING: git push failed (will retry next cycle)`) and continues. The commit is still saved locally. Common causes:
 
-- **Token expired or revoked** — regenerate the PAT and update `GITHUB_TOKEN` in Railway
-- **Remote not configured** — run `git remote add origin <url>` in `/alfred`
-- **Network issue** — transient; the next scheduler cycle retries automatically
-- **Force-push needed** — if you reset the remote repo, SSH in and run `git push --force-with-lease origin main` once
+- **Token expired or revoked** — Regenerate PAT and update `GITHUB_TOKEN` in Railway
+- **Remote not configured** — Run `git remote add origin <url>` in `/alfred`
+- **Network issue** — Transient; next scheduler cycle retries automatically
+- **Force-push needed** — If you reset the remote repo, SSH in and run `git push --force-with-lease origin main` once
 
-## Rollback
+### Rollback
 
 Delete `/alfred/config.env` → system reverts to pure env-var behavior. No code changes needed.
 

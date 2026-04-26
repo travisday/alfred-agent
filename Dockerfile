@@ -30,6 +30,10 @@ RUN cd /opt/alfred-pi-config/extensions/web-search && npm install
 # Install discord-notify extension dependencies
 RUN cd /opt/alfred-pi-config/extensions/discord-notify && npm install
 
+# Memory loader script (synced to /alfred/ on container boot)
+COPY memory-loader.sh /opt/memory-loader.sh
+RUN chmod +x /opt/memory-loader.sh
+
 # Proactive check-in prompts + scheduler (read-only path; not hidden by /alfred volume)
 COPY proactive/ /opt/proactive/
 RUN chmod +x /opt/proactive/scheduler.sh /opt/proactive/run-checkin.sh /opt/proactive/test-discord-dm.sh

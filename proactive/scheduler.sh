@@ -114,6 +114,10 @@ run_checkin_verified() {
   trap 'rm -f "$tmp"' RETURN
 
   log "Starting verified check-in: $name"
+
+  # Load blocks/ as always-on context for the agent
+  MEMORY_CONTEXT=$(/alfred/memory-loader.sh 2>/dev/null || echo "# Memory loader failed")
+
   set +e
   (
     cd /alfred || exit 1
@@ -121,6 +125,7 @@ run_checkin_verified() {
       --thinking "$THINKING" \
       --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
       --append-system-prompt "${PROACTIVE_ROOT}/append-discord-mandatory.md" \
+      --append-system-prompt "$MEMORY_CONTEXT" \
       "@${prompt}" 2>&1
   ) | tee -a "$logfile" > "$tmp"
   local st="${PIPESTATUS[0]}"

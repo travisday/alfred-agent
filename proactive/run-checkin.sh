@@ -57,6 +57,9 @@ THINKING="${PROACTIVE_THINKING:-off}"
 cd /alfred
 
 if [ "$VERIFY" = true ]; then
+  # Load blocks/ as always-on context even in verify mode
+  MEMORY_CONTEXT=$(/alfred/memory-loader.sh 2>/dev/null || echo "# Memory loader failed")
+
   TMP=$(mktemp)
   trap 'rm -f "$TMP"' EXIT
   set +e
@@ -64,6 +67,7 @@ if [ "$VERIFY" = true ]; then
     --thinking "$THINKING" \
     --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
     --append-system-prompt "$APPEND" \
+    --append-system-prompt "$MEMORY_CONTEXT" \
     "@${PROMPT}" 2>&1 | tee "$TMP"
   ST="${PIPESTATUS[0]}"
   set -e
@@ -79,8 +83,12 @@ if [ "$VERIFY" = true ]; then
   exit 1
 fi
 
+# Load blocks/ as always-on context
+MEMORY_CONTEXT=$(/alfred/memory-loader.sh 2>/dev/null || echo "# Memory loader failed")
+
 exec pi -p --no-session \
   --thinking "$THINKING" \
   --model "${PROACTIVE_MODEL:-${ALFRED_MODEL:-groq/llama-3.3-70b-versatile}}" \
   --append-system-prompt "$APPEND" \
+  --append-system-prompt "$MEMORY_CONTEXT" \
   "@${PROMPT}"

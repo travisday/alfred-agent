@@ -33,6 +33,12 @@ if [ -d /opt/alfred-pi-config ]; then
   echo "Synced .pi/ config into workspace"
 fi
 
+# --- Sync memory-loader.sh from Docker image ---
+if [ -f /opt/memory-loader.sh ]; then
+  cp -a /opt/memory-loader.sh /alfred/memory-loader.sh
+  echo "Synced memory-loader.sh"
+fi
+
 # --- Sync proactive scripts and prompts from image ---
 if [ -d /opt/proactive ]; then
   mkdir -p /alfred/proactive
@@ -107,7 +113,7 @@ cat > /alfred/.gitignore << 'GITIGNORE_EOF'
 .pi/
 proactive/
 
-# Ephemeral / operational state
+# Ephemeral / operational state (these are NOT tracked in git)
 state/proactive-slots.state
 state/proactive-*.log
 state/proactive.log
