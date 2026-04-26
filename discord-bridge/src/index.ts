@@ -38,6 +38,7 @@ const ALLOWED_USER_IDS = new Set(
     .map((v) => v.trim())
     .filter(Boolean)
 );
+const processedMessageIds = new Set<string>();
 
 let session: AgentSession | null = null;
 let processing = false;
@@ -570,7 +571,7 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
     const next = messageQueue.shift();
     if (next) {
       setImmediate(() => {
-        void handleDM(next.message);
+        void handleForegroundTask(next.message, next.channel, next.content);
       });
     }
   }
@@ -578,6 +579,8 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
 
 async function handleDM(message: Message): Promise<void> {
   if (message.author.bot) return;
+  if (processedMessageIds.has(message.id)) return;
+  processedMessageIds.add(message.id);
   const isDM = message.channel.isDMBased();
   if (!isDM) return;
 
