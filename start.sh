@@ -23,46 +23,6 @@ fi
 # --- Remove legacy project-local .pi on the memory volume (harness lives in agentDir now) ---
 rm -rf /alfred/.pi 2>/dev/null || true
 
-# --- Load /alfred/config.env (user preferences on the volume) ---
-# Simple KEY=VALUE parser — Railway env vars always override for secrets.
-# Preference vars (TIMEZONE, ALFRED_MODEL, etc.) allow config.env to override empty values.
-apply_config() {
-  local file="$1"
-  [ -f "$file" ] || return 0
-  while IFS= read -r line || [ -n "$line" ]; do
-    # Skip blank lines and comments
-    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-    # Strip inline comments, trim whitespace
-    line="${line%%#*}"
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-    [ -z "$line" ] && continue
-    local key="${line%%=*}"
-    local val="${line#*=}"
-    # For preference vars, allow config.env to override empty values
-    # For secrets/keys, Railway env always wins
-    local is_pref=0
-    case "$key" in
-      TIMEZONE|CALDAV_TIMEZONE|ALFRED_MODEL)
-        is_pref=1 ;;
-    esac
-    if [ "$is_pref" = "1" ] && [ -z "${!key:-}" ]; then
-      # Preference var is empty or unset → apply from config.env
-      declare -gx "$key=$val"
-    elif [ -z "${!key+x}" ]; then
-      # Secret var is completely unset → apply from config.env
-      declare -gx "$key=$val"
-    fi
-  done < "$file"
-}
-apply_config /alfred/config.env
-
-# --- Generate default config.env on first boot ---
-if [ ! -f /alfred/config.env ]; then
-  cp /opt/config.env.template /alfred/config.env
-  echo "Generated default /alfred/config.env (all commented out)"
-fi
-
 # --- Pi APPEND_SYSTEM from blocks/ (global agentDir; cwd stays /alfred for memory only) ---
 mkdir -p /root/.pi/agent
 if [ -x /opt/memory-loader.sh ]; then
