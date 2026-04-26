@@ -114,6 +114,17 @@ function formatErrorForUser(err: unknown): string {
   if (msg.includes("context length") || msg.includes("context window") || msg.includes("max tokens")) {
     return "This request is too long. Try breaking it into smaller parts.";
   }
+  if (
+    msg.includes("Personal Access Tokens are not supported") ||
+    msg.includes("third-party user token")
+  ) {
+    console.error("[Discord bridge] GitHub Copilot / PAT auth error, original:", rawMsg);
+    return (
+      "LLM misconfiguration: a GitHub PAT or Copilot path is hitting an API that rejects it. " +
+      "Set ALFRED_MODEL to a model you have a key for (e.g. groq/llama-3.3-70b-versatile) and set GROQ_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY in Railway. " +
+      "Do not use GITHUB_TOKEN or a repo PAT as an LLM key. See docs/troubleshooting.md."
+    );
+  }
   // Catch cryptic or truncated errors (very short messages or suspicious patterns like "ae adjust")
   if (msg.length < 15 || /\b[a-z]{1,2}\s+adjust\b/i.test(msg)) {
     console.error("[Discord bridge] Cryptic error detected, original:", rawMsg);
