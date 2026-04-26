@@ -176,45 +176,12 @@ run_checkin_with_retry() {
 run_daily_maintenance() {
   log "Running daily maintenance"
 
-  # Reset today.md with today's date
-  echo "# Today: $(date +%Y-%m-%d)" > /alfred/state/today.md
-  echo "" >> /alfred/state/today.md
-  log "Reset today.md"
-  log_event "daily_today_reset" "Reset state/today.md for $(date +%Y-%m-%d); active-context timestamp left unchanged"
-
   # Reset check-in failure counters from previous day
   if [ -f "$STATE_FILE" ]; then
     local tmp_state
     tmp_state="$(mktemp)"
     awk '!/^_fail_/' "$STATE_FILE" > "$tmp_state"
     mv "$tmp_state" "$STATE_FILE"
-  fi
-
-  # Archive completed tasks from tasks.md → tasks-archive.md
-  if [ -f /alfred/tasks.md ]; then
-    local archived=0
-    local tmp_keep tmp_archive
-    tmp_keep="$(mktemp)"
-    tmp_archive="$(mktemp)"
-    while IFS= read -r line || [ -n "$line" ]; do
-      if echo "$line" | grep -qE '^\s*-\s*\[x\]'; then
-        echo "$line" >> "$tmp_archive"
-        archived=$((archived + 1))
-      else
-        echo "$line" >> "$tmp_keep"
-      fi
-    done < /alfred/tasks.md
-    if [ "$archived" -gt 0 ]; then
-      # Append archived tasks with date header
-      {
-        echo ""
-        echo "## Archived $(date +%Y-%m-%d)"
-        cat "$tmp_archive"
-      } >> /alfred/tasks-archive.md
-      mv "$tmp_keep" /alfred/tasks.md
-      log "Archived $archived completed tasks"
-    fi
-    rm -f "$tmp_keep" "$tmp_archive"
   fi
 
   # Truncate proactive logs to last 500 lines

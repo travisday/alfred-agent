@@ -37,7 +37,7 @@ Alfred is a self-hosted AI assistant that runs 24/7 in a Docker container. You S
 │                           │                                 │
 │  ┌────────────────┴───────────────────────────────┐ │
 │  │           /alfred (persistent memory repo)             │ │
-│  │     blocks/ · state/ · logs/ · tasks.md            │ │
+│  │     blocks/ · state/ · logs/ · skills/            │ │
 │  └────────────────────────────────────────────────────────┘ │
 │                                                              │
 │  ┌──────────┐  ┌────────┐                                   │
@@ -88,6 +88,29 @@ alfred-memory/
 
 **Key principle:** Always-on vs on-demand is structural — different directories, explicit. `blocks/*.yaml` are loaded at every turn via `memory-loader.sh`. Everything else is read on demand.
 
+	## Memory system (separate repo: alfred-memory)
+
+	The memory system uses Open-STRiX structure:
+
+	```
+	alfred-memory/
+	├── blocks/              # YAML — always loaded in every prompt
+	│   ├── identity.yaml      # Who you are, role, location, preferences
+	│   ├── goals.yaml         # Current goals with status and next action
+	│   └── patterns.yaml      # Recurring commitments, habits
+	├── state/               # Markdown — read on demand
+	│   └── .gitkeep         # Project notes, research (create files as needed)
+	├── skills/              # Markdown skills
+	│   └── .gitkeep         # Drop skills here, auto-discovered
+	├── logs/                # Append-only JSONL
+	│   ├── events.jsonl       # All tool calls, errors, scheduler triggers
+	│   ├── journal.jsonl      # Agent's own log — what happened, what predicted
+	│   └── chat-history.jsonl # Transcript of all conversations
+	├── config.yaml           # Model, Discord config, preferences
+	└── .gitignore            # Only chat-history.jsonl is ephemeral
+	```
+
+	**Key principle:** Always-on vs on-demand is structural — different directories, explicit. `blocks/*.yaml` are loaded at every turn via `memory-loader.sh`. Everything else is read on demand.
 ## Extensions
 
 | Extension | Tools | Description |
