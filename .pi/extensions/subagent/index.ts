@@ -5,9 +5,16 @@
  * Tool: delegate_task — runs a task in an in-memory sub-agent session and returns
  * the result. Use for multi-step or long-running work (summaries, refactors, etc.)
  * so Alfred can acknowledge quickly and then report back when done.
+ *
+ * Loads the same blocks/ context as proactive/Discord (memory-loader) so delegated
+ * work matches /alfred as the single source of truth (prd.md).
  */
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import {
   createAgentSession,
+  DefaultResourceLoader,
+  getAgentDir,
   SessionManager,
   type ExtensionAPI,
 } from "@mariozechner/pi-coding-agent";
@@ -35,6 +42,22 @@ function extractTextFromMessage(msg: { content?: unknown }): string {
 }
 
 let delegationInProgress = false;
+
+function loadMemoryAppendForCwd(cwd: string): string | undefined {
+  const script =
+    process.env.ALFRED_MEMORY_LOADER_PATH?.trim() || join(cwd, "memory-loader.sh");
+  const memoryRoot = process.env.ALFRED_MEMORY_ROOT?.trim() || cwd;
+  try {
+    const out = execFileSync(script, {
+      encoding: "utf8",
+      maxBuffer: 2_000_000,
+      env: { ...process.env, ALFRED_MEMORY_ROOT: memoryRoot },
+    }).trim();
+    return out.length > 0 ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
@@ -68,9 +91,17 @@ export default function (pi: ExtensionAPI) {
       const taskWithPreamble = SUB_AGENT_PREAMBLE + params.task;
 
       try {
+        const memoryAppend = loadMemoryAppendForCwd(cwd);
+        const resourceLoader = new DefaultResourceLoader({
+          cwd,
+          agentDir: getAgentDir(),
+          ...(memoryAppend ? { appendSystemPrompt: memoryAppend } : {}),
+        });
+        await resourceLoader.reload();
         const { session } = await createAgentSession({
           cwd,
           sessionManager: SessionManager.inMemory(),
+          resourceLoader,
         });
 
         let lastAssistantText = "";

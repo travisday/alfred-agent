@@ -48,7 +48,7 @@ if [ -d /opt/proactive ]; then
   done
   # Prompts are repo-owned defaults but version-gated so local runtime edits survive
   # until the agent repo intentionally bumps the prompt version.
-  PROMPT_VERSION=3
+  PROMPT_VERSION=4
   mkdir -p /alfred/proactive/prompts
   current_version=$(cat /alfred/proactive/prompts/.version 2>/dev/null || echo "0")
   if [ "$current_version" -lt "$PROMPT_VERSION" ] 2>/dev/null; then
@@ -101,6 +101,18 @@ if [ ! -f /alfred/config.env ]; then
   echo "Generated default /alfred/config.env (all commented out)"
 fi
 
+# --- Pi append prompt from blocks/ (SSH `pi`, subagent defaults, any Pi using /alfred cwd) ---
+# DefaultResourceLoader discovers .pi/APPEND_SYSTEM.md under cwd. Regenerate after config.env
+# so ALFRED_MEMORY_ROOT applies. Discord/proactive still use memory-loader per-turn as well.
+if [ -d /alfred/.pi ] && [ -x /alfred/memory-loader.sh ]; then
+  if /alfred/memory-loader.sh > /alfred/.pi/APPEND_SYSTEM.md 2>/dev/null; then
+    echo "Refreshed /alfred/.pi/APPEND_SYSTEM.md from blocks/ (memory-loader)"
+  else
+    rm -f /alfred/.pi/APPEND_SYSTEM.md 2>/dev/null || true
+    echo "WARNING: memory-loader failed; omitted APPEND_SYSTEM.md"
+  fi
+fi
+
 # --- Git-based memory versioning ---
 cd /alfred
 git config user.name "Alfred" 2>/dev/null || true
@@ -119,6 +131,7 @@ state/proactive-*.log
 state/proactive.log
 state/proactive.lock
 state/task-sessions/
+state/pi-session/
 state/discord-tasks.json
 
 # Tailscale networking state
@@ -144,7 +157,7 @@ if [ ! -d /alfred/.git ]; then
   echo "Initialized git repo in /alfred for memory versioning"
 else
   # Existing deployment: untrack paths now covered by .gitignore
-  (cd /alfred && git rm -r --cached .pi/ proactive/ .tailscale/ state/proactive-slots.state state/task-sessions/ state/discord-tasks.json 2>/dev/null || true)
+  (cd /alfred && git rm -r --cached .pi/ proactive/ .tailscale/ state/proactive-slots.state state/task-sessions/ state/pi-session/ state/discord-tasks.json 2>/dev/null || true)
   (cd /alfred && git rm --cached state/proactive-*.log 2>/dev/null || true)
 fi
 

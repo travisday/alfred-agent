@@ -60,6 +60,8 @@ Only secrets and infrastructure toggles belong in Railway. Set these in your Rai
 # DISCORD_ALLOWED_USER_IDS=
 # DISCORD_PROMPT_TIMEOUT_MS=300000
 # DISCORD_TASK_TIMEOUT_MS=1800000
+# ALFRED_PI_SESSION_DIR=/alfred/state/pi-session   # Pi transcript for Discord (gitignored); optional override
+# ALFRED_MEMORY_LOADER_PATH=/alfred/memory-loader.sh
 
 # --- Sub-agent ---
 # DELEGATE_TASK_TIMEOUT_MS=300000
@@ -111,14 +113,15 @@ alfred-memory/
 │   ├── projects/         # Project-specific content, read when needed
 │   ├── active-context.md   # Initiatives, session notes
 │   └── today.md          # Daily priorities (auto-sets)
+├── skills/              # Optional markdown skills
 ├── logs/                # APPEND-ONLY JSONL
 │   ├── events.jsonl       # Operational events
-│   └── journal.jsonl      # Session history
-├── tasks.md              # Discrete tasks with due dates
-└── tasks-archive.md       # Completed tasks (>3 days old)
+│   ├── journal.jsonl      # Session history
+│   └── chat-history.jsonl # Conversation transcript (optional)
+└── config.yaml           # Local preferences template
 ```
 
-Key principle: Always-on vs on-demand is structural — different directories, explicit. `blocks/*.yaml` are loaded at every turn via `memory-loader.sh`. Everything else is read on demand.
+Key principle: Always-on vs on-demand is structural — different directories, explicit. `blocks/*.yaml` are loaded at every turn via `memory-loader.sh`. Everything else is read on demand. Next actions and priorities live in **`blocks/goals.yaml`** (and related YAML), not `tasks.md`.
 
 ## GitHub memory syncing
 
@@ -139,15 +142,11 @@ Each commit gets a descriptive message like `auto: check-in morning 2025-04-24T0
 
 `start.sh` writes a `.gitignore` on every boot. Only your personal data is committed:
 
-| Tracked | Gitignored |
+| Tracked (personal data in git) | Gitignored by `start.sh` on `/alfred` |
 |----------|------------|
-| `blocks/` | `.pi/` (synced from image on boot) |
-| `state/` | `proactive/` (synced from image on boot) |
-| `logs/` | `.tailscale/` |
-| `tasks.md`, `tasks-archive.md` | `config.env` |
-| `proactive-slots.state`, `proactive*.log`, `proactive.lock` | `state/task-sessions/`, `state/discord-tasks.json` |
-| `state/proactive-slots.state` | `state/proactive-*.log` |
-| journal entries | `.DS_Store`, `._*` |
+| `blocks/`, `logs/`, `skills/`, `config.yaml`, and most files under `state/` | `.pi/`, `proactive/`, `.tailscale/` |
+| Work items use **`blocks/goals.yaml`** (Open-STRiX), not root `tasks.md` | `state/proactive-slots.state`, `state/proactive-*.log`, `state/proactive.log`, `state/proactive.lock`, `state/task-sessions/`, `state/discord-tasks.json` |
+| | `.DS_Store`, `._*` |
 
 ### Setting up GitHub push
 

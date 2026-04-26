@@ -8,7 +8,7 @@
 tailscale ssh root@alfred
 ```
 
-Then `cd /alfred && pi`. See below for SFTP and optional native SSH.
+Then `cd /alfred && pi`. On boot, `start.sh` writes `blocks/` into `/alfred/.pi/APPEND_SYSTEM.md` so interactive Pi loads the same YAML context at session startup as proactive check-ins (edit `blocks/` and restart the service, or rely on tool reads for mid-session updates). See [Troubleshooting](troubleshooting.md) for Discord vs SSH transcript paths.
 
 **Via Discord (if `DISCORD_BOT_TOKEN` is set):** DM the bot — no SSH needed. Same workspace and session as SSH.
 

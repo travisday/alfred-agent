@@ -1,10 +1,18 @@
 /**
  * Alfred Discord Bridge — talk to Alfred via DMs.
  */
-import { createAgentSession, SessionManager, ModelRegistry, AuthStorage, type AgentSession } from "@mariozechner/pi-coding-agent";
+import {
+  createAgentSession,
+  SessionManager,
+  ModelRegistry,
+  AuthStorage,
+  getAgentDir,
+  type AgentSession,
+} from "@mariozechner/pi-coding-agent";
 import { Client, DMChannel, Events, GatewayIntentBits, Partials, type Message } from "discord.js";
-import http from "node:http";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import http from "node:http";
 import {
   createTask,
   getTask,
@@ -16,10 +24,13 @@ import {
   verifyTaskCallback,
   getPublicTaskInfo,
 } from "./tasks.js";
+import { AlfredDiscordResourceLoader } from "./resourceLoader.js";
 import { sendTaskCompletionCallback } from "./workerClient.js";
 
 const ALFRED_CWD = "/alfred";
-const SESSION_DIR = "/alfred/.pi/sessions/discord";
+const PI_SESSION_DIR = (process.env.ALFRED_PI_SESSION_DIR ?? "/alfred/state/pi-session").trim() || "/alfred/state/pi-session";
+const MEMORY_LOADER_SCRIPT = (process.env.ALFRED_MEMORY_LOADER_PATH ?? "/alfred/memory-loader.sh").trim() || "/alfred/memory-loader.sh";
+const LEGACY_DISCORD_SESSION_DIR = "/alfred/.pi/sessions/discord";
 const CHUNK_SIZE = 1900;
 const DEFAULT_PROMPT_TIMEOUT_MS = 300_000;
 const DEFAULT_TASK_TIMEOUT_MS = 1_800_000;
@@ -40,6 +51,7 @@ const ALLOWED_USER_IDS = new Set(
 );
 const processedMessageIds = new Set<string>();
 
+let sharedResourceLoader: AlfredDiscordResourceLoader | null = null;
 let session: AgentSession | null = null;
 let processing = false;
 type MessageQueueItem = { message: Message; content: string; channel: DMChannel };
@@ -193,6 +205,28 @@ function resolveConfiguredModel(): { model?: any; modelRegistry?: ModelRegistry 
   return { modelRegistry };
 }
 
+async function ensureResourceLoader(): Promise<AlfredDiscordResourceLoader> {
+  if (!sharedResourceLoader) {
+    sharedResourceLoader = new AlfredDiscordResourceLoader({
+      cwd: ALFRED_CWD,
+      agentDir: getAgentDir(),
+      memoryLoaderPath: MEMORY_LOADER_SCRIPT,
+    });
+    await sharedResourceLoader.reload();
+  }
+  return sharedResourceLoader;
+}
+
+function clearInteractivePiSessionDir(): void {
+  fs.rmSync(PI_SESSION_DIR, { recursive: true, force: true });
+  fs.mkdirSync(PI_SESSION_DIR, { recursive: true });
+}
+
+/** Rebuild system prompt so fresh `blocks/` from memory-loader is applied (matches proactive check-ins). */
+function refreshPromptContext(s: AgentSession): void {
+  s.setActiveToolsByName(s.getActiveToolNames());
+}
+
 async function getOrCreateSession(forceNew = false): Promise<AgentSession> {
   if (forceNew && session) {
     session.dispose();
@@ -201,12 +235,18 @@ async function getOrCreateSession(forceNew = false): Promise<AgentSession> {
 
   if (session) return session;
 
-  const sessionManager = SessionManager.continueRecent(ALFRED_CWD, SESSION_DIR);
+  if (forceNew) {
+    clearInteractivePiSessionDir();
+  }
+
+  const resourceLoader = await ensureResourceLoader();
+  const sessionManager = SessionManager.continueRecent(ALFRED_CWD, PI_SESSION_DIR);
   const { model, modelRegistry } = resolveConfiguredModel();
-  console.log("[Discord bridge] Continuing Pi session (or creating new)");
+  console.log("[Discord bridge] Pi interactive session dir:", PI_SESSION_DIR);
   const { session: s, modelFallbackMessage } = await createAgentSession({
     cwd: ALFRED_CWD,
     sessionManager,
+    resourceLoader,
     ...(model && { model }),
     ...(modelRegistry && { modelRegistry }),
   });
@@ -423,13 +463,16 @@ async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<
     await report("running", "Background task started.");
     const manager = SessionManager.create(ALFRED_CWD, `/alfred/state/task-sessions/${task.id}`);
     const { model: bgModel, modelRegistry: bgRegistry } = resolveConfiguredModel();
+    const resourceLoader = await ensureResourceLoader();
     const { session: taskSession } = await createAgentSession({
       cwd: ALFRED_CWD,
       sessionManager: manager,
+      resourceLoader,
       ...(bgModel && { model: bgModel }),
       ...(bgRegistry && { modelRegistry: bgRegistry }),
     });
 
+    refreshPromptContext(taskSession);
     const promptPromise = taskSession.prompt(wrappedPrompt);
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
@@ -509,6 +552,7 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
     reassuranceId = setTimeout(sendReassurance, REASSURANCE_INTERVAL_MS);
 
     try {
+      refreshPromptContext(s);
       await Promise.race([s.prompt(buildForegroundPrompt(content)), timeoutPromise]);
     } finally {
       clearTimeout(timeoutId!);
@@ -762,6 +806,15 @@ async function main(): Promise<void> {
 
   const alfredModel = process.env.ALFRED_MODEL ?? "";
   console.log(`[Discord bridge] ALFRED_MODEL env: "${alfredModel || '(not set)'}"`);
+  console.log(`[Discord bridge] ALFRED_PI_SESSION_DIR: ${PI_SESSION_DIR}`);
+
+  if (fs.existsSync(LEGACY_DISCORD_SESSION_DIR)) {
+    console.warn(
+      "[Discord bridge] Legacy Discord-only session dir still exists (ignored):",
+      LEGACY_DISCORD_SESSION_DIR,
+      "- safe to delete on the volume after upgrading."
+    );
+  }
 
   const recoveredCount = recoverNonTerminalTasks();
   if (recoveredCount > 0) {

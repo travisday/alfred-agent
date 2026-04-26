@@ -66,51 +66,26 @@ Alfred runs the Pi agent on-demand inside the container. State is plain markdown
 
 ## Memory system (separate repo: alfred-memory)
 
-The memory system uses a structural separation:
+Open-STRiX layout (clone as `/alfred` on the server):
 
 ```
 alfred-memory/
-├── blocks/              # ALWAYS-IN-PROMPT YAML
-│   ├── identity.yaml      # Who the user is, current focus, goals
-│   ├── preferences.yaml    # Communication style, workflow preferences
-│   ├── goals.yaml         # Current goals and status
+├── blocks/              # YAML — always loaded via memory-loader.sh
+│   ├── identity.yaml      # Who you are, role, focus
+│   ├── preferences.yaml   # Communication and workflow (optional)
+│   ├── goals.yaml         # Current goals with status and next action
 │   └── patterns.yaml      # Recurring commitments, habits
-├── state/               # ON-DEMAND MARKDOWN
-│   ├── projects/         # Project-specific content, read when needed
-│   ├── active-context.md   # Initiatives, session notes
-│   └── today.md          # Daily priorities (auto-resets)
-├── logs/                # APPEND-ONLY JSONL
-│   ├── events.jsonl       # Operational events (scheduler, delivery)
-│   └── journal.jsonl      # Session history
-├── tasks.md              # Discrete tasks with due dates
-└── tasks-archive.md       # Completed tasks (>3 days old)
+├── state/               # Markdown — read on demand (projects, notes, today.md, …)
+├── skills/              # Optional markdown skills (auto-discovered when present)
+├── logs/                # Append-only JSONL
+│   ├── events.jsonl       # Operational events
+│   ├── journal.jsonl      # Agent log — what happened, what it predicted
+│   └── chat-history.jsonl # Conversation transcript (optional; often gitignored)
+├── config.yaml           # Local preferences template (secrets still in Railway)
+└── .gitignore
 ```
 
-**Key principle:** Always-on vs on-demand is structural — different directories, explicit. `blocks/*.yaml` are loaded at every turn via `memory-loader.sh`. Everything else is read on demand.
-
-	## Memory system (separate repo: alfred-memory)
-
-	The memory system uses Open-STRiX structure:
-
-	```
-	alfred-memory/
-	├── blocks/              # YAML — always loaded in every prompt
-	│   ├── identity.yaml      # Who you are, role, location, preferences
-	│   ├── goals.yaml         # Current goals with status and next action
-	│   └── patterns.yaml      # Recurring commitments, habits
-	├── state/               # Markdown — read on demand
-	│   └── .gitkeep         # Project notes, research (create files as needed)
-	├── skills/              # Markdown skills
-	│   └── .gitkeep         # Drop skills here, auto-discovered
-	├── logs/                # Append-only JSONL
-	│   ├── events.jsonl       # All tool calls, errors, scheduler triggers
-	│   ├── journal.jsonl      # Agent's own log — what happened, what predicted
-	│   └── chat-history.jsonl # Transcript of all conversations
-	├── config.yaml           # Model, Discord config, preferences
-	└── .gitignore            # Only chat-history.jsonl is ephemeral
-	```
-
-	**Key principle:** Always-on vs on-demand is structural — different directories, explicit. `blocks/*.yaml` are loaded at every turn via `memory-loader.sh`. Everything else is read on demand.
+**Key principle:** Always-on vs on-demand is structural — different directories, explicit. `blocks/*.yaml` are loaded at every turn via `memory-loader.sh`. Everything else is read on demand. Work items and next actions live in **`blocks/goals.yaml`**, not a root-level `tasks.md`.
 ## Extensions
 
 | Extension | Tools | Description |

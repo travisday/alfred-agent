@@ -100,9 +100,10 @@ On first boot, the `/alfred` volume will be empty. Create the workspace:
 
 ```bash
 cd /alfred
-mkdir -p blocks state projects logs
-touch tasks.md tasks-archive.md
+mkdir -p blocks state/projects logs skills
 ```
+
+If you are not cloning `alfred-memory` wholesale, add `config.yaml` at the repo root (see the `alfred-memory` template).
 
 The memory system uses a structural separation:
 
@@ -117,11 +118,12 @@ alfred-memory/
 │   ├── projects/         # Project-specific content, read when needed
 │   ├── active-context.md   # Initiatives, session notes
 │   └── today.md          # Daily priorities (auto-sets)
+├── skills/              # Optional markdown skills
 ├── logs/                # APPEND-ONLY JSONL
 │   ├── events.jsonl       # Operational events
-│   └── journal.jsonl      # Session history
-├── tasks.md              # Discrete tasks with due dates
-└── tasks-archive.md       # Completed tasks (>3 days old)
+│   ├── journal.jsonl      # Session history
+│   └── chat-history.jsonl # Conversation transcript (optional)
+└── config.yaml           # Local preferences template
 ```
 
 Key principle: Always-on vs on-demand is structural — different directories, explicit. `blocks/*.yaml` are loaded at every turn via `memory-loader.sh`. Everything else is read on demand.
@@ -166,7 +168,7 @@ EOF
 
 > Do not use `.pi/SYSTEM.md` for Alfred behavior — that's supplied by the `alfred-agent` repo and synced into `/alfred/.pi/` on every boot.
 >
-> The volume `/alfred` is Alfred's personal context: memory files, state files, project notes, tasks, and journal entries. Agent behavior is supplied by `alfred-agent` repo.
+> The volume `/alfred` is Alfred's personal context: memory files, state files, project notes, goals (`blocks/goals.yaml`), and journal entries. Agent behavior is supplied by `alfred-agent` repo.
 
 ## 9. Optional integrations
 
@@ -206,7 +208,7 @@ To talk to Alfred via Discord DMs:
 The bridge creates a Pi session on your first DM. Conversation persists across messages and container restarts.
 
 Discord commands:
-- `!new` - Reset interactive session context
+- `!new` - Clear Pi transcript under `ALFRED_PI_SESSION_DIR` (default `/alfred/state/pi-session`) and start a fresh session
 - `!task <request>` - Run work in background and get a completion DM
 - `!status` - List your recent task IDs and states
 - `!status <taskId>` - Inspect one task
@@ -304,8 +306,8 @@ Should show:
 - state/
 - logs/
 - proactive/
-- tasks.md
-- tasks-archive.md
+- skills/ (optional)
+- config.yaml
 - config.env
 
 ## 11. What's next

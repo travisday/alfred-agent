@@ -43,7 +43,7 @@ Runtime contract:
 
 ### Structure: blocks/ vs state/ vs logs/ vs skills/
 
-**Always-on (blocks/) — loaded at start of every turn via memory-loader.sh:**
+**Always-on (blocks/) — injected via `memory-loader.sh`:** Discord DMs, `delegate_task`, and proactive runs prepend it each invocation; SSH `pi` loads a boot snapshot from `/alfred/.pi/APPEND_SYSTEM.md` (regenerated when the service starts).
 
 | File | Contains | Update frequency |
 |------|----------|-----------------|
