@@ -7,7 +7,12 @@ type BaseLoaderOptions = ConstructorParameters<typeof DefaultResourceLoader>[0];
 
 function runMemoryLoader(scriptPath: string): string {
   try {
-    const out = execFileSync(scriptPath, { encoding: "utf8", maxBuffer: 2_000_000 });
+    const memoryRoot = process.env.ALFRED_MEMORY_ROOT?.trim() || "/alfred";
+    const out = execFileSync(scriptPath, {
+      encoding: "utf8",
+      maxBuffer: 2_000_000,
+      env: { ...process.env, ALFRED_MEMORY_ROOT: memoryRoot },
+    });
     return out.trim();
   } catch (err) {
     console.warn("[Discord bridge] memory-loader.sh failed:", err);

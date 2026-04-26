@@ -24,9 +24,7 @@ Only secrets and infrastructure toggles belong in Railway. Set these in your Rai
 | `DISCORD_BOT_TOKEN` | Optional | Discord bot token — enables DM bridge |
 | `CALDAV_APP_PASSWORD` | Optional | App-specific password for iCloud CalDAV |
 | `TAVILY_API_KEY` | Optional | Enables Tavily-backed `web_search` tool |
-| `GITHUB_TOKEN` | Optional | GitHub PAT — enables automatic push of memory repo |
-| `TASK_WEBHOOK_SECRET` | Optional | Secret for signing task completion webhooks |
-| `PROACTIVE_ENABLED` | No | Set to `1` to enable scheduled check-ins (easy on/off toggle) |
+| `GITHUB_TOKEN` | Optional | GitHub PAT — `start.sh` can rewrite `git remote` for authenticated push |
 
 > You need **at least one** LLM API key. You can set multiple to switch between providers at runtime.
 >
@@ -36,40 +34,7 @@ Only secrets and infrastructure toggles belong in Railway. Set these in your Rai
 
 ## `/alfred/config.env` reference
 
-```env
-# /alfred/config.env — Runtime preferences
-# Edit this file to customize Alfred without redeploying.
-# Platform env vars (Railway, Docker) always override these values.
-# See .env.example in the repo for the complete variable reference.
-
-# --- General ---
-# TIMEZONE=America/Los_Angeles
-# ALFRED_MODEL=                    # provider/model-id (e.g. anthropic/claude-sonnet-4-5-20250929)
-
-# --- Proactive check-ins ---
-# PROACTIVE_SCHEDULE=8:00,12:00,18:00
-# PROACTIVE_MODEL=                 # Override model for check-ins (falls back to ALFRED_MODEL)
-# PROACTIVE_THINKING=off
-# PROACTIVE_POLL_SECS=300
-# PROACTIVE_MAX_RETRIES=0
-
-# --- Discord ---
-# DISCORD_DM_POLICY=open           # open | owner_only | allowlist
-# DISCORD_OWNER_USER_ID=
-# DISCORD_PROACTIVE_USER_ID=
-# DISCORD_ALLOWED_USER_IDS=
-# DISCORD_PROMPT_TIMEOUT_MS=300000
-# DISCORD_TASK_TIMEOUT_MS=1800000
-# ALFRED_PI_SESSION_DIR=/alfred/state/pi-session   # Pi transcript for Discord (gitignored); optional override
-# ALFRED_MEMORY_LOADER_PATH=/alfred/memory-loader.sh
-
-# --- Sub-agent ---
-# DELEGATE_TASK_TIMEOUT_MS=300000
-
-# --- CalDAV (Apple Calendar) ---
-# CALDAV_SERVER_URL=https://caldav.icloud.com
-# CALDAV_USERNAME=
-```
+See [`config.env.template`](../config.env.template) in the repo (copied to `/alfred/config.env` on first boot).
 
 ## Editing config.env
 
@@ -90,13 +55,13 @@ Changes take effect on the next container restart.
 
 ## Timezone
 
-Set `TIMEZONE` once and Alfred exports it as process-wide `TZ`; the proactive scheduler, Discord/Pi child processes, shell dates, and CalDAV calendar all use the same local day:
+Set `TIMEZONE` once and Alfred exports it as process-wide `TZ`; Discord/Pi child processes, shell dates, and CalDAV calendar use the same local day:
 
 ```env
 TIMEZONE=America/New_York
 ```
 
-The old per-subsystem vars (`PROACTIVE_TZ`, `CALDAV_TIMEZONE`) still work and override `TIMEZONE` for their subsystem if set. If `TIMEZONE` is absent but `PROACTIVE_TZ` is set, boot also exports `TZ=$PROACTIVE_TZ`.
+You can override calendar display with `CALDAV_TIMEZONE` if needed.
 
 ## Memory system (separate repo: alfred-memory)
 
@@ -125,18 +90,7 @@ Key principle: Always-on vs on-demand is structural — different directories, e
 
 ## GitHub memory syncing
 
-Alfred can automatically commit and push changes in the `/alfred` memory volume to a private GitHub repo. This gives you off-site backup and a full history of how your workspace evolves.
-
-### What it does
-
-The proactive scheduler runs `git add -A && git commit && git push` after each event:
-
-- Check-ins (morning, midday, evening)
-- Daily maintenance
-- 2-hour maintenance ticks
-- Weekly reviews
-
-Each commit gets a descriptive message like `auto: check-in morning 2025-04-24T08:05:00` or `auto: daily maintenance 2025-04-24T07:58:00`.
+Commit and push `/alfred` from SSH when you want off-site backup and history. With `GITHUB_TOKEN` set in Railway, `start.sh` rewrites `origin` to use the token so `git push` works non-interactively.
 
 ### What gets tracked vs. gitignored
 
@@ -144,8 +98,8 @@ Each commit gets a descriptive message like `auto: check-in morning 2025-04-24T0
 
 | Tracked (personal data in git) | Gitignored by `start.sh` on `/alfred` |
 |----------|------------|
-| `blocks/`, `logs/`, `skills/`, `config.yaml`, and most files under `state/` | `.pi/`, `proactive/`, `.tailscale/` |
-| Work items use **`blocks/goals.yaml`** (Open-STRiX), not root `tasks.md` | `state/proactive-slots.state`, `state/proactive-*.log`, `state/proactive.log`, `state/proactive.lock`, `state/task-sessions/`, `state/discord-tasks.json` |
+| `blocks/`, `logs/`, `skills/`, `config.yaml`, and most files under `state/` | `.tailscale/` |
+| Work items use **`blocks/goals.yaml`** (Open-STRiX), not root `tasks.md` | Legacy / empty paths: `state/proactive-slots.state`, `state/proactive-*.log`, `state/proactive.log`, `state/proactive.lock`, `state/task-sessions/`, `state/pi-session/`, `state/discord-tasks.json` (harness lives under **`/root/.pi/agent`**, not these) |
 | | `.DS_Store`, `._*` |
 
 ### Setting up GitHub push
@@ -177,11 +131,9 @@ https://github.com/user/repo.git
 → https://x-access-token:TOKEN@github.com/user/repo.git
 ```
 
-The scheduler will then auto-push after every commit.
-
 ### Manual operations
 
-You can commit and push manually at any time from an SSH session:
+Commit and push from an SSH session:
 
 ```bash
 cd /alfred
@@ -191,11 +143,11 @@ git push origin main
 
 ### If push fails
 
-The scheduler logs a warning (`WARNING: git push failed (will retry next cycle)`) and continues. The commit is still saved locally. Common causes:
+Common causes:
 
 - **Token expired or revoked** — Regenerate PAT and update `GITHUB_TOKEN` in Railway
 - **Remote not configured** — Run `git remote add origin <url>` in `/alfred`
-- **Network issue** — Transient; next scheduler cycle retries automatically
+- **Network issue** — Retry when connectivity returns
 - **Force-push needed** — If you reset the remote repo, SSH in and run `git push --force-with-lease origin main` once
 
 ### Rollback

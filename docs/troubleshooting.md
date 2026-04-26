@@ -48,15 +48,9 @@ That text is **not from Discord**. It is from **GitHub Copilot’s API** (or ano
 
 ## `WARNING: memory-loader failed; omitted APPEND_SYSTEM.md`
 
-- Usually means `/alfred/memory-loader.sh` exited non-zero (for example a script bug, missing `blocks/`, or non-executable script). After deploy, check `ls -la /alfred/blocks /alfred/memory-loader.sh` and run `/alfred/memory-loader.sh` once by hand to see the error.
+- Usually means `/opt/memory-loader.sh` exited non-zero (for example a script bug, missing `blocks/`, or non-executable script). After deploy, check `ls -la /alfred/blocks /opt/memory-loader.sh` and run `ALFRED_MEMORY_ROOT=/alfred /opt/memory-loader.sh` once by hand to see the error.
 
-## Discord task finished but no completion DM
-
-- Set `TASK_WEBHOOK_SECRET` so signed task callbacks and completion notifications are enabled
-- Check logs for `Task completion webhook listening` and `Invalid callback token/signature` messages
-- If DM access is restricted, verify `DISCORD_DM_POLICY` and user IDs are configured correctly
-
-## Stale Discord replies after resetting `alfred-memory` (or “blank `blocks/` but old tasks”)
+## Stale Discord replies after resetting `alfred-memory`
 
 **Git is not the whole volume.** Pushing a fresh `alfred-memory` repo updates tracked files under `/alfred`, but **gitignored runtime state** can still hold old data.
 
@@ -64,21 +58,18 @@ That text is **not from Discord**. It is from **GitHub Copilot’s API** (or ano
 
 1. `cd /alfred && git status -sb && git log -1 --oneline`
 2. `ls -la blocks/ && cat blocks/*.yaml 2>/dev/null`
-3. **Interactive Pi session (Discord + SSH when configured to match):** `ls -la "${ALFRED_PI_SESSION_DIR:-/alfred/state/pi-session}" 2>/dev/null`
-4. **Legacy path (safe to delete after upgrade):** `ls -la .pi/sessions/discord 2>/dev/null`
-5. **`!status` store:** `ls -la state/discord-tasks.json 2>/dev/null`
-6. **Stray notes:** `find state logs -maxdepth 2 -type f 2>/dev/null | head -50`
-7. **Overrides:** `grep -E '^ALFRED_PI_SESSION_DIR|^ALFRED_MEMORY_LOADER_PATH|^DISCORD_TASKS_FILE|^ALFRED_MEMORY_ROOT' /alfred/config.env 2>/dev/null; env | grep -E 'ALFRED_PI_SESSION_DIR|DISCORD_TASKS_FILE|ALFRED_MEMORY_ROOT'`
+3. **Interactive Pi session (Discord):** default dir is `~/.pi/agent/sessions/--alfred--/` (override with `ALFRED_PI_SESSION_DIR`). Example: `ls -la /root/.pi/agent/sessions/--alfred-- 2>/dev/null`
+4. **Legacy paths (safe to delete):** `ls -la .pi/sessions/discord state/pi-session 2>/dev/null`
+5. **Stray notes:** `find state logs -maxdepth 2 -type f 2>/dev/null | head -50`
+6. **Overrides:** `grep -E '^ALFRED_PI_SESSION_DIR|^ALFRED_MEMORY_LOADER_PATH|^ALFRED_MEMORY_ROOT' /alfred/config.env 2>/dev/null; env | grep -E 'ALFRED_PI_SESSION_DIR|ALFRED_MEMORY_ROOT'`
 
-**How it works now:** The bridge keeps **one interactive session directory** (default `/alfred/state/pi-session`, override with `ALFRED_PI_SESSION_DIR`). It is **gitignored**. Each DM **refreshes `blocks/`** via `memory-loader.sh` into the system prompt (same idea as proactive check-ins). **`!new`** deletes that directory and starts a **new** Pi session (it no longer only disposed the in-process object).
+**How it works:** Pi **agent harness** lives under **`/root/.pi/agent`** (SYSTEM, extensions, `APPEND_SYSTEM.md`, auth, default session dirs). **`/alfred`** is the git **memory** workspace only. Each DM **refreshes `blocks/`** via `/opt/memory-loader.sh` into the system prompt. **`!new`** clears the interactive session directory (Pi default or `ALFRED_PI_SESSION_DIR`).
 
 **Hard reset** (when you want the volume to match a blank repo intent): stop the service if you can, then on the box remove at least:
 
-- `state/pi-session/` (or your `ALFRED_PI_SESSION_DIR`)
-- Optional: legacy `.pi/sessions/discord/`
-- `state/discord-tasks.json` if `!status` is wrong
-- `state/task-sessions/` for orphaned background Pi sessions
+- Under **`/root/.pi/agent`:** `sessions/--alfred--` (or your `ALFRED_PI_SESSION_DIR`)
+- Legacy on volume: `state/pi-session/`, `state/discord-tasks.json`, `state/task-sessions/`, `.pi/`
 
 Then `cd /alfred && git fetch && git reset --hard origin/<branch> && git clean -fd` (review before running — drops **untracked** files). Redeploy.
 
-**SSH `pi` vs Discord:** Both use **`cwd: /alfred`** and the same files for durable memory. The **transcript** path for Discord is `ALFRED_PI_SESSION_DIR`. The stock `pi` CLI uses its own default session layout unless you wrap it; sharing one continuous transcript across Discord and SSH requires matching Pi session configuration (future enhancement). **Goals and state on disk are still shared.**
+**SSH `pi` vs Discord:** Both use **`cwd: /alfred`** and the same files for durable memory. By default both use Pi’s session dir **`~/.pi/agent/sessions/--alfred--/`** unless you set **`ALFRED_PI_SESSION_DIR`** for Discord only. **Goals and memory files on `/alfred` are still shared.**

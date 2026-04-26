@@ -10,56 +10,18 @@ fi
 # --- Clean macOS resource fork files (accumulate from SSHFS/Finder) ---
 find /alfred -maxdepth 2 -name '._*' -delete 2>/dev/null || true
 
-# --- Migrate tasks.json out of sessions dir (one-time) ---
-if [ -f /alfred/.pi/sessions/discord/tasks.json ] && [ ! -f /alfred/state/discord-tasks.json ]; then
-  mkdir -p /alfred/state
-  mv /alfred/.pi/sessions/discord/tasks.json /alfred/state/discord-tasks.json
-  echo "Migrated tasks.json to /alfred/state/discord-tasks.json"
-fi
-
-# --- Clean up ephemeral sessions (>2 days old) ---
-find /alfred/.pi/sessions -name "*.jsonl" -mtime +2 -delete 2>/dev/null || true
-find /alfred/.pi/sessions -type d -empty -delete 2>/dev/null || true
-find /alfred/state/task-sessions -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
-echo "Cleaned stale sessions"
-
 # --- Remove stale AGENTS.md from volume (agent behavior now lives in .pi/SYSTEM.md) ---
 rm -f /alfred/AGENTS.md 2>/dev/null || true
 
-# --- Sync .pi/ config from Docker image into the volume ---
+# --- Sync Pi agent config (SYSTEM, extensions) to global agentDir (not the memory volume) ---
 if [ -d /opt/alfred-pi-config ]; then
-  mkdir -p /alfred/.pi
-  cp -a /opt/alfred-pi-config/. /alfred/.pi/
-  echo "Synced .pi/ config into workspace"
+  mkdir -p /root/.pi/agent
+  cp -a /opt/alfred-pi-config/. /root/.pi/agent/
+  echo "Synced Pi config to /root/.pi/agent"
 fi
 
-# --- Sync memory-loader.sh from Docker image ---
-if [ -f /opt/memory-loader.sh ]; then
-  cp -a /opt/memory-loader.sh /alfred/memory-loader.sh
-  echo "Synced memory-loader.sh"
-fi
-
-# --- Sync proactive scripts and prompts from image ---
-if [ -d /opt/proactive ]; then
-  mkdir -p /alfred/proactive
-  # Scripts are repo-owned code — overwrite on every boot
-  for f in /opt/proactive/*.sh /opt/proactive/*.md; do
-    [ -f "$f" ] && cp -a "$f" /alfred/proactive/
-  done
-  # Prompts are repo-owned defaults but version-gated so local runtime edits survive
-  # until the agent repo intentionally bumps the prompt version.
-  PROMPT_VERSION=4
-  mkdir -p /alfred/proactive/prompts
-  current_version=$(cat /alfred/proactive/prompts/.version 2>/dev/null || echo "0")
-  if [ "$current_version" -lt "$PROMPT_VERSION" ] 2>/dev/null; then
-    if [ -d /opt/proactive/prompts ]; then
-      cp -a /opt/proactive/prompts/. /alfred/proactive/prompts/
-    fi
-    echo "$PROMPT_VERSION" > /alfred/proactive/prompts/.version
-    echo "Seeded proactive prompts (v${PROMPT_VERSION}) in /alfred/proactive/prompts/"
-  fi
-  echo "Synced proactive scripts into workspace"
-fi
+# --- Remove legacy project-local .pi on the memory volume (harness lives in agentDir now) ---
+rm -rf /alfred/.pi 2>/dev/null || true
 
 # --- Load /alfred/config.env (user preferences on the volume) ---
 # Simple KEY=VALUE parser — Railway env vars always override for secrets.
@@ -81,7 +43,7 @@ apply_config() {
     # For secrets/keys, Railway env always wins
     local is_pref=0
     case "$key" in
-      TIMEZONE|PROACTIVE_TZ|CALDAV_TIMEZONE|ALFRED_MODEL|PROACTIVE_MODEL)
+      TIMEZONE|CALDAV_TIMEZONE|ALFRED_MODEL)
         is_pref=1 ;;
     esac
     if [ "$is_pref" = "1" ] && [ -z "${!key:-}" ]; then
@@ -101,14 +63,13 @@ if [ ! -f /alfred/config.env ]; then
   echo "Generated default /alfred/config.env (all commented out)"
 fi
 
-# --- Pi append prompt from blocks/ (SSH `pi`, subagent defaults, any Pi using /alfred cwd) ---
-# DefaultResourceLoader discovers .pi/APPEND_SYSTEM.md under cwd. Regenerate after config.env
-# so ALFRED_MEMORY_ROOT applies. Discord/proactive still use memory-loader per-turn as well.
-if [ -d /alfred/.pi ] && [ -x /alfred/memory-loader.sh ]; then
-  if /alfred/memory-loader.sh > /alfred/.pi/APPEND_SYSTEM.md 2>/dev/null; then
-    echo "Refreshed /alfred/.pi/APPEND_SYSTEM.md from blocks/ (memory-loader)"
+# --- Pi APPEND_SYSTEM from blocks/ (global agentDir; cwd stays /alfred for memory only) ---
+mkdir -p /root/.pi/agent
+if [ -x /opt/memory-loader.sh ]; then
+  if ALFRED_MEMORY_ROOT=/alfred /opt/memory-loader.sh > /root/.pi/agent/APPEND_SYSTEM.md 2>/dev/null; then
+    echo "Refreshed /root/.pi/agent/APPEND_SYSTEM.md from blocks/ (memory-loader)"
   else
-    rm -f /alfred/.pi/APPEND_SYSTEM.md 2>/dev/null || true
+    rm -f /root/.pi/agent/APPEND_SYSTEM.md 2>/dev/null || true
     echo "WARNING: memory-loader failed; omitted APPEND_SYSTEM.md"
   fi
 fi
@@ -121,11 +82,7 @@ git config user.email "alfred@automated" 2>/dev/null || true
 # Ensure .gitignore exists — only personal data should be tracked.
 # Agent infrastructure is synced from the Docker image on every boot.
 cat > /alfred/.gitignore << 'GITIGNORE_EOF'
-# Agent infrastructure (overwritten from image on every boot)
-.pi/
-proactive/
-
-# Ephemeral / operational state (these are NOT tracked in git)
+# Legacy operational paths (harness under /root/.pi/agent — not on volume)
 state/proactive-slots.state
 state/proactive-*.log
 state/proactive.log
@@ -157,22 +114,21 @@ if [ ! -d /alfred/.git ]; then
   echo "Initialized git repo in /alfred for memory versioning"
 else
   # Existing deployment: untrack paths now covered by .gitignore
-  (cd /alfred && git rm -r --cached .pi/ proactive/ .tailscale/ state/proactive-slots.state state/task-sessions/ state/pi-session/ state/discord-tasks.json 2>/dev/null || true)
+  (cd /alfred && git rm -r --cached .tailscale/ state/proactive-slots.state state/task-sessions/ state/pi-session/ state/discord-tasks.json .pi/ proactive/ 2>/dev/null || true)
   (cd /alfred && git rm --cached state/proactive-*.log 2>/dev/null || true)
 fi
 
 # --- Unify timezone ---
-# Export TZ for every child process. Without this, Discord/Pi sessions can
-# fall back to UTC even while the proactive scheduler uses Pacific time.
-EFFECTIVE_TZ="${TIMEZONE:-${PROACTIVE_TZ:-${TZ:-America/Los_Angeles}}}"
-: "${PROACTIVE_TZ:=$EFFECTIVE_TZ}"
+EFFECTIVE_TZ="${TIMEZONE:-${TZ:-America/Los_Angeles}}"
 : "${CALDAV_TIMEZONE:=$EFFECTIVE_TZ}"
 TZ="$EFFECTIVE_TZ"
-export PROACTIVE_TZ CALDAV_TIMEZONE TZ
+export CALDAV_TIMEZONE TZ
+# Operational files off the memory volume (Pi agentDir); override in Railway if needed
+export ALFRED_EVENT_FILE="${ALFRED_EVENT_FILE:-/root/.pi/agent/events.jsonl}"
+export ALFRED_MEMORY_ROOT="${ALFRED_MEMORY_ROOT:-/alfred}"
 
 # --- Default model ---
 # ALFRED_MODEL is the single knob for model selection across all channels.
-# Proactive scripts use it via fallback chain (PROACTIVE_MODEL > ALFRED_MODEL > hardcoded default).
 # Discord bridge and subagent sessions use Pi's built-in resolution (auth.json / env / models.json).
 # Export it so it's available to all child processes.
 if [ -n "${ALFRED_MODEL:-}" ]; then
@@ -268,25 +224,6 @@ if [ -n "$DISCORD_BOT_TOKEN" ] && [ -d /opt/discord-bridge ]; then
   echo "Discord bridge started"
 fi
 
-# --- Proactive check-ins (optional) ---
-PROACTIVE_RECIPIENT="${DISCORD_PROACTIVE_USER_ID:-${DISCORD_OWNER_USER_ID:-}}"
-HAS_LLM_KEY=false
-if [ -n "${GROQ_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${GEMINI_API_KEY:-}" ]; then
-  HAS_LLM_KEY=true
-fi
-if [ "${PROACTIVE_ENABLED:-}" = "1" ] && [ -n "${DISCORD_BOT_TOKEN:-}" ] && [ -n "$PROACTIVE_RECIPIENT" ] && [ "$HAS_LLM_KEY" = true ]; then
-  PROACTIVE_ROOT="${PROACTIVE_ROOT:-/alfred/proactive}"
-  export PROACTIVE_ROOT
-  if [ -x "${PROACTIVE_ROOT}/scheduler.sh" ]; then
-    "${PROACTIVE_ROOT}/scheduler.sh" &
-    echo "Proactive check-ins scheduler started (TZ=${PROACTIVE_TZ:-${TIMEZONE:-America/Los_Angeles}}, PROACTIVE_ROOT=${PROACTIVE_ROOT})"
-  else
-    echo "WARNING: PROACTIVE_ENABLED but ${PROACTIVE_ROOT}/scheduler.sh missing or not executable"
-  fi
-elif [ "${PROACTIVE_ENABLED:-}" = "1" ]; then
-  echo "WARNING: PROACTIVE_ENABLED but proactive scheduler not started (need DISCORD_BOT_TOKEN, DISCORD_PROACTIVE_USER_ID or DISCORD_OWNER_USER_ID, and at least one LLM API key)"
-fi
-
 if [ -n "$TAVILY_API_KEY" ]; then
   echo "Tavily web search enabled"
 fi
@@ -296,9 +233,6 @@ echo " Alfred is online."
 echo " Connect via: ssh alfred"
 if [ -n "$DISCORD_BOT_TOKEN" ]; then
   echo " Discord: DM the bot to talk to Alfred"
-fi
-if [ "${PROACTIVE_ENABLED:-}" = "1" ] && [ -n "${DISCORD_BOT_TOKEN:-}" ] && [ -n "$PROACTIVE_RECIPIENT" ] && [ "$HAS_LLM_KEY" = true ]; then
-  echo " Proactive: scheduled check-ins enabled"
 fi
 echo "==============================="
 

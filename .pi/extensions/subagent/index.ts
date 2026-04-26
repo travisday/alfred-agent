@@ -6,11 +6,10 @@
  * the result. Use for multi-step or long-running work (summaries, refactors, etc.)
  * so Alfred can acknowledge quickly and then report back when done.
  *
- * Loads the same blocks/ context as proactive/Discord (memory-loader) so delegated
+ * Loads the same blocks/ context as the Discord bridge (memory-loader) so delegated
  * work matches /alfred as the single source of truth (prd.md).
  */
 import { execFileSync } from "node:child_process";
-import { join } from "node:path";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -45,7 +44,7 @@ let delegationInProgress = false;
 
 function loadMemoryAppendForCwd(cwd: string): string | undefined {
   const script =
-    process.env.ALFRED_MEMORY_LOADER_PATH?.trim() || join(cwd, "memory-loader.sh");
+    process.env.ALFRED_MEMORY_LOADER_PATH?.trim() || "/opt/memory-loader.sh";
   const memoryRoot = process.env.ALFRED_MEMORY_ROOT?.trim() || cwd;
   try {
     const out = execFileSync(script, {

@@ -4,14 +4,13 @@ A self-hosted AI assistant that lives on a server — accessible from any device
 
 ## What it does
 
-Alfred is a self-hosted AI assistant that runs 24/7 in a Docker container. You SSH in (or DM a Discord bot) and interact with an LLM agent that has persistent memory, calendar access, web search, and scheduled check-ins — all stored on a single volume as plain markdown files. `alfred-agent` is the harness; separate `alfred-memory` repo is the memory system, checked out as a volume at `/alfred`.
+Alfred is a self-hosted AI assistant that runs 24/7 in a Docker container. You SSH in (or DM a Discord bot) and interact with an LLM agent that has persistent memory, calendar access, and web search — all stored on a single volume as plain files. `alfred-agent` is the harness; separate `alfred-memory` repo is the memory system, checked out as a volume at `/alfred`.
 
 ## Features
 
-- **Persistent memory** — Context lives in markdown files on a volume, survives restarts, and grows over time
+- **Persistent memory** — Context lives in files on a volume, survives restarts, and grows over time
 - **Multi-provider LLM** — Swap between Groq, Anthropic, OpenAI, and Gemini at runtime
-- **Discord bridge** — DM bot for the same experience as SSH, with `/task` for background work
-- **Proactive check-ins** — Scheduled morning, midday, and evening summaries delivered via Discord DM
+- **Discord bridge** — DM bot wired to the same Pi session + memory as SSH
 - **Apple Calendar** — Read your iCloud calendar with CalDAV (today's events, upcoming, date ranges)
 - **Web search** — Live Tavily-powered search with cost-conscious defaults
 - **Sub-agent delegation** — Offload long-running tasks to keep the main session responsive
@@ -21,48 +20,44 @@ Alfred is a self-hosted AI assistant that runs 24/7 in a Docker container. You S
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                     Railway Container                        │
-│                                                              │
-│  ┌──────────────┐  ┌───────────────┐  ┌───────────────────┐ │
-│  │   Pi Agent   │  │    Discord    │  │    Proactive      │ │
-│  │   (Alfred)   │  │    Bridge     │  │    Scheduler      │ │
-│  │              │  │  DMs ↔ Agent  │  │  morning/mid/eve  │ │
-│  └──────┬───────┘  └───────┬───────┘  └────────┬──────────┘ │
-│         │                  │                   │            │
-│  ┌──────┴──────────────────┴───────────────────┴───────────┐ │
-│  │              .pi/extensions/                           │ │
-│  │  caldav · discord-notify · web-search · subagent       │ │
-│  └────────────────────────┬───────────────────────────────┘ │
-│                           │                                 │
-│  ┌────────────────┴───────────────────────────────┐ │
-│  │           /alfred (persistent memory repo)             │ │
-│  │     blocks/ · state/ · logs/ · skills/            │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                                                              │
-│  ┌──────────┐  ┌────────┐                                   │
-│  │Tailscale │  │  SSH   │                                   │
-│  │  (VPN)   │  │  Server │                                   │
-│  └────┬─────┘  └───┬────┘                                   │
-│       │                  │                                   │
-│  ┌──────┼─────────────┼───────────────────────────────────────┐ │
-│  │ SSH from  │    │ Discord │                                   │
-│  │ any device│    │   DMs   │                                   │
-│  └───────────┘    └─────────┘                                   │
-└───────────┼─────────────┼───────────────────────────────────────────────┘
-          │              │
-          ▼
-          │ Tailscale private network
-          ▼
-    ┌───────────┐    ┌─────────┐
-    │ SSH from  │    │ Discord │
-    │ any device│    │   DMs   │
-    └───────────┘    └─────────┘
+┌────────────────────────────────────────────────────────────┐
+│                     Railway Container                      │
+│                                                            │
+│  ┌──────────────┐  ┌───────────────┐                      │
+│  │   Pi Agent   │  │    Discord    │                      │
+│  │   (Alfred)   │  │    Bridge     │                      │
+│  │              │  │  DMs ↔ Agent  │                      │
+│  └──────┬───────┘  └───────┬───────┘                      │
+│         │                  │                              │
+│  ┌──────┴──────────────────┴──────────────────────────────┐ │
+│  │              .pi/extensions/                         │ │
+│  │  caldav · discord-notify · web-search · subagent     │ │
+│  └────────────────────────┬────────────────────────────┘ │
+│                           │                                │
+│  ┌────────────────────────┴───────────────────────────────┐│
+│  │           /alfred (persistent memory repo)             ││
+│  │     blocks/ · state/ · logs/ · skills/                 ││
+│  └────────────────────────────────────────────────────────┘│
+│                                                            │
+│  ┌──────────┐  ┌────────┐                                  │
+│  │Tailscale │  │  SSH   │                                  │
+│  │  (VPN)   │  │ Server │                                  │
+│  └────┬─────┘  └───┬────┘                                  │
+│       │            │                                       │
+│       └──────┬─────┘                                       │
+│              ▼                                             │
+│       Tailscale private network                            │
+│              ▼                                             │
+│    ┌───────────────┐    ┌─────────┐                        │
+│    │ SSH / SFTP    │    │ Discord│                        │
+│    │  any device   │    │   DMs  │                        │
+│    └───────────────┘    └─────────┘                        │
+└────────────────────────────────────────────────────────────┘
 ```
 
 ## How it works
 
-Alfred runs the Pi agent on-demand inside the container. State is plain markdown files in `/alfred` — no database. LLM inference is handled by your provider's API (no GPU needed). Tailscale provides a private encrypted network so nothing is exposed to the public internet. Extensions are auto-discovered from `.pi/extensions/` and activate based on which env vars are set.
+Alfred runs the Pi agent on-demand inside the container. **Memory** is plain files in `/alfred` (git); **Pi harness** (SYSTEM, extensions, sessions, Discord task store) lives under **`/root/.pi/agent`** — no database. LLM inference is handled by your provider's API (no GPU needed). Tailscale provides a private encrypted network so nothing is exposed to the public internet. Extensions are auto-discovered from `.pi/extensions/` and activate based on which env vars are set.
 
 ## Memory system (separate repo: alfred-memory)
 
@@ -91,13 +86,9 @@ alfred-memory/
 | Extension | Tools | Description |
 |-----------|-------|-------------|
 | **caldav** | `get_today_events`, `get_calendar_events`, `get_upcoming` | Read Apple Calendar via iCloud CalDAV |
-| **discord-notify** | `send_discord_message` | Send Discord DMs (used by proactive check-ins) |
+| **discord-notify** | `send_discord_message` | Send Discord DMs from tools (REST API) |
 | **web-search** | `web_search` | Live web search via Tavily API |
 | **subagent** | `delegate_task` | Offload long tasks to a background agent |
-
-## Proactive check-ins
-
-With `PROACTIVE_ENABLED=1`, Alfred runs three daily check-ins at configurable times (default 8:00, 12:00, 18:00). Each check-in reads your memory, calendar, and project state, then DMs you a summary via Discord. Default prompts are owned by `alfred-agent` and seeded into `/alfred/proactive/prompts/` when `PROMPT_VERSION` increases.
 
 ## Quick start
 

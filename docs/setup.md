@@ -166,7 +166,7 @@ commitments:
 EOF
 ```
 
-> Do not use `.pi/SYSTEM.md` for Alfred behavior — that's supplied by the `alfred-agent` repo and synced into `/alfred/.pi/` on every boot.
+> Do not use `.pi/SYSTEM.md` for Alfred behavior — that's supplied by the `alfred-agent` repo and synced into **`/root/.pi/agent/`** on every boot (not the `/alfred` memory volume).
 >
 > The volume `/alfred` is Alfred's personal context: memory files, state files, project notes, goals (`blocks/goals.yaml`), and journal entries. Agent behavior is supplied by `alfred-agent` repo.
 
@@ -199,38 +199,18 @@ To talk to Alfred via Discord DMs:
 3. Enable **Message Content Intent** (Privileged Gateway Intents)
 4. Add the bot to a server (or use OAuth2 URL generator)
 5. Set `DISCORD_BOT_TOKEN` in Railway
-6. Set recipient user ID in `/alfred/config.env`:
+6. Set your Discord user ID in `/alfred/config.env` (for DM policy / `send_discord_message` recipient):
 
    ```env
-   DISCORD_PROACTIVE_USER_ID=your_discord_id
+   DISCORD_OWNER_USER_ID=your_discord_id
    ```
 
 The bridge creates a Pi session on your first DM. Conversation persists across messages and container restarts.
 
-Discord commands:
-- `!new` - Clear Pi transcript under `ALFRED_PI_SESSION_DIR` (default `/alfred/state/pi-session`) and start a fresh session
-- `!task <request>` - Run work in background and get a completion DM
-- `!status` - List your recent task IDs and states
-- `!status <taskId>` - Inspect one task
+Discord command:
+- `!new` — Clear Pi interactive session dir (default `~/.pi/agent/sessions/--alfred--/`, or `ALFRED_PI_SESSION_DIR`) and start a fresh session
 
 Discord preferences (DM policy, user IDs, timeouts) go in `/alfred/config.env`.
-
-### Proactive check-ins
-
-Set `PROACTIVE_ENABLED=1` in Railway to run three daily check-ins:
-
-| Variable | Default | Description |
-|----------|--------|-------------|
-| `PROACTIVE_ENABLED` | `1` | Enable scheduled check-ins |
-| `PROACTIVE_SCHEDULE` | `8:00,12:00,18:00` | When check-ins run (your `TIMEZONE`) |
-| `PROACTIVE_MODEL` | `ALFRED_MODEL` | Override model for check-ins |
-| `PROACTIVE_THINKING` | `off` | Enable model thinking |
-| `PROACTIVE_POLL_SECS` | `300` | How often scheduler checks for triggers |
-| `PROACTIVE_MAX_RETRIES` | `0` | How many times scheduler retries failures |
-
-You also need `DISCORD_BOT_TOKEN` and a recipient user ID (`DISCORD_PROACTIVE_USER_ID` or `DISCORD_OWNER_USER_ID`) — the user must have **DMed the bot at least once** so Discord allows outbound DMs.
-
-Default prompts are owned by `alfred-agent` and seeded into `/alfred/proactive/prompts/` when `PROMPT_VERSION` increases. To customize prompts, edit files directly in `/alfred/proactive/prompts/` — changes persist across restarts.
 
 ### Web search (Tavily)
 
@@ -242,26 +222,9 @@ Default behavior is cost-conscious: basic search depth, small result set, option
 
 ## 10. Test Alfred
 
-### Discord-only smoke test (no LLM)
+### Discord smoke test
 
-Proves token + recipient + "you DM'd the bot":
-
-```bash
-"${PROACTIVE_ROOT:-/opt/proactive}/test-discord-dm.sh"
-```
-
-You should receive a short test DM. If this fails, fix env or Discord before debugging Pi.
-
-### Full check-in (Discord + Pi + tools)
-
-Same as scheduler runs:
-
-```bash
-cd /alfred
-pi -p --no-session --model groq/llama-3.3-70b-versatile @proactive/prompts/morning.md
-```
-
-`-p --no-session` runs Pi without persistent session state (each check-in starts fresh but has access to `/alfred` files and tools).
+DM the bot with a short message. If you get a reply, the bridge and LLM path are working.
 
 ### SSH session
 
@@ -278,7 +241,7 @@ Talk to Alfred. When done, quit Pi with `Ctrl+C`.
 Verify the memory loader works:
 
 ```bash
-/alfred/memory-loader.sh
+ALFRED_MEMORY_ROOT=/alfred /opt/memory-loader.sh
 ```
 
 Should output formatted blocks as markdown:
@@ -305,7 +268,6 @@ Should show:
 - blocks/
 - state/
 - logs/
-- proactive/
 - skills/ (optional)
 - config.yaml
 - config.env

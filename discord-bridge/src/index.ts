@@ -10,37 +10,30 @@ import {
   type AgentSession,
 } from "@mariozechner/pi-coding-agent";
 import { Client, DMChannel, Events, GatewayIntentBits, Partials, type Message } from "discord.js";
-import crypto from "node:crypto";
 import fs from "node:fs";
-import http from "node:http";
-import {
-  createTask,
-  getTask,
-  listTasksByDiscordUser,
-  recoverNonTerminalTasks,
-  updateTask,
-  type TaskCompletionPayload,
-  type TaskRecord,
-  verifyTaskCallback,
-  getPublicTaskInfo,
-} from "./tasks.js";
+import path from "node:path";
 import { AlfredDiscordResourceLoader } from "./resourceLoader.js";
-import { sendTaskCompletionCallback } from "./workerClient.js";
 
 const ALFRED_CWD = "/alfred";
-const PI_SESSION_DIR = (process.env.ALFRED_PI_SESSION_DIR ?? "/alfred/state/pi-session").trim() || "/alfred/state/pi-session";
-const MEMORY_LOADER_SCRIPT = (process.env.ALFRED_MEMORY_LOADER_PATH ?? "/alfred/memory-loader.sh").trim() || "/alfred/memory-loader.sh";
-const LEGACY_DISCORD_SESSION_DIR = "/alfred/.pi/sessions/discord";
+const MEMORY_LOADER_SCRIPT = (process.env.ALFRED_MEMORY_LOADER_PATH ?? "/opt/memory-loader.sh").trim() || "/opt/memory-loader.sh";
+
+/** Pi default session parent dir: ~/.pi/agent/sessions/--<cwd-encoded>--/ */
+function getPiDefaultSessionParentDir(cwd: string): string {
+  const safePath = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+  return path.join(getAgentDir(), "sessions", safePath);
+}
+
+/** Effective interactive session directory (override or Pi default). */
+function getInteractiveSessionDir(): string {
+  const override = process.env.ALFRED_PI_SESSION_DIR?.trim();
+  if (override) return override;
+  return getPiDefaultSessionParentDir(ALFRED_CWD);
+}
 const CHUNK_SIZE = 1900;
 const DEFAULT_PROMPT_TIMEOUT_MS = 300_000;
-const DEFAULT_TASK_TIMEOUT_MS = 1_800_000;
 const REASSURANCE_INTERVAL_MS = 60_000;
-const DEFAULT_WEBHOOK_PORT = 8080;
-const NOTIFICATION_MAX_RETRIES = 5;
-const BACKGROUND_REQUIRED_TOKEN = "__ALFRED_BACKGROUND_REQUIRED__";
 
 const PROMPT_TIMEOUT_MS = parseInt(process.env.DISCORD_PROMPT_TIMEOUT_MS ?? "", 10) || DEFAULT_PROMPT_TIMEOUT_MS;
-const TASK_TIMEOUT_MS = parseInt(process.env.DISCORD_TASK_TIMEOUT_MS ?? "", 10) || DEFAULT_TASK_TIMEOUT_MS;
 const DM_POLICY = (process.env.DISCORD_DM_POLICY ?? "open").trim().toLowerCase();
 const OWNER_USER_ID = (process.env.DISCORD_OWNER_USER_ID ?? "").trim();
 const ALLOWED_USER_IDS = new Set(
@@ -57,28 +50,6 @@ let processing = false;
 type MessageQueueItem = { message: Message; content: string; channel: DMChannel };
 
 const messageQueue: MessageQueueItem[] = [];
-const completionRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-function getTaskWebhookSecret(): string | null {
-  const s = process.env.TASK_WEBHOOK_SECRET;
-  if (typeof s === "string" && s.trim().length > 0) return s.trim();
-  return null;
-}
-
-function getWebhookBaseUrl(): string {
-  const configured = process.env.TASK_WEBHOOK_BASE_URL?.trim();
-  if (configured) return configured;
-  const port = parseInt(process.env.TASK_WEBHOOK_PORT ?? "", 10) || DEFAULT_WEBHOOK_PORT;
-  return `http://127.0.0.1:${port}`;
-}
-
-function computeHmacSignature(secret: string, body: string): string {
-  return crypto.createHmac("sha256", secret).update(body, "utf8").digest("hex");
-}
-
-function isTerminalTaskStatus(status: string): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
-}
 
 function sanitizeErrorMessage(msg: string): string {
   // Remove ANSI color codes and other terminal escapes
@@ -229,11 +200,10 @@ async function ensureResourceLoader(): Promise<AlfredDiscordResourceLoader> {
 }
 
 function clearInteractivePiSessionDir(): void {
-  fs.rmSync(PI_SESSION_DIR, { recursive: true, force: true });
-  fs.mkdirSync(PI_SESSION_DIR, { recursive: true });
+  fs.rmSync(getInteractiveSessionDir(), { recursive: true, force: true });
 }
 
-/** Rebuild system prompt so fresh `blocks/` from memory-loader is applied (matches proactive check-ins). */
+/** Rebuild system prompt so fresh `blocks/` from memory-loader is applied. */
 function refreshPromptContext(s: AgentSession): void {
   s.setActiveToolsByName(s.getActiveToolNames());
 }
@@ -251,9 +221,12 @@ async function getOrCreateSession(forceNew = false): Promise<AgentSession> {
   }
 
   const resourceLoader = await ensureResourceLoader();
-  const sessionManager = SessionManager.continueRecent(ALFRED_CWD, PI_SESSION_DIR);
+  const sessionDirOverride = process.env.ALFRED_PI_SESSION_DIR?.trim();
+  const sessionManager = sessionDirOverride
+    ? SessionManager.continueRecent(ALFRED_CWD, sessionDirOverride)
+    : SessionManager.continueRecent(ALFRED_CWD);
   const { model, modelRegistry } = resolveConfiguredModel();
-  console.log("[Discord bridge] Pi interactive session dir:", PI_SESSION_DIR);
+  console.log("[Discord bridge] Pi interactive session dir:", getInteractiveSessionDir());
   const { session: s, modelFallbackMessage } = await createAgentSession({
     cwd: ALFRED_CWD,
     sessionManager,
@@ -296,219 +269,10 @@ async function sendToDiscord(channel: DMChannel, text: string, replyTo?: Message
   }
 }
 
-function parseTaskCommand(content: string): string | null {
-  if (!content.toLowerCase().startsWith("!task")) return null;
-  return content.slice("!task".length).trim();
-}
-
-function parseStatusCommand(content: string): string | null {
-  if (!content.toLowerCase().startsWith("!status")) return null;
-  return content.slice("!status".length).trim() || null;
-}
-
-function buildForegroundPrompt(content: string): string {
-  return [
-    `If this request requires extensive research, multi-file scanning, or long-running operations, respond with exactly: ${BACKGROUND_REQUIRED_TOKEN}`,
-    "Do not add extra words when returning that token.",
-    "",
-    content,
-  ].join("\n");
-}
-
 function canUserAccessDM(userId: string): boolean {
   if (DM_POLICY === "owner_only") return OWNER_USER_ID.length > 0 && userId === OWNER_USER_ID;
   if (DM_POLICY === "allowlist") return ALLOWED_USER_IDS.has(userId);
   return true;
-}
-
-async function showTaskStatus(channel: DMChannel, message: Message, maybeTaskId: string | null): Promise<void> {
-  const userId = message.author.id;
-  if (maybeTaskId) {
-    const task = getTask(maybeTaskId);
-    if (!task || task.discordUserId !== userId) {
-      await channel.send({
-        content: "Task not found for your user.",
-        reply: { messageReference: message },
-      });
-      return;
-    }
-    await channel.send({
-      content: `Task \`${task.id}\`\nStatus: \`${task.status}\`\nUpdated: ${task.updatedAt}${task.summary ? `\nSummary: ${task.summary}` : ""}`,
-      reply: { messageReference: message },
-    });
-    return;
-  }
-
-  const tasks = listTasksByDiscordUser(userId, 5);
-  if (tasks.length === 0) {
-    await channel.send({
-      content: "No tasks found yet. Use `!task <request>` for background work.",
-      reply: { messageReference: message },
-    });
-    return;
-  }
-
-  const lines = tasks.map((t) => `- \`${t.id}\` \`${t.status}\` (${new Date(t.updatedAt).toLocaleString()})`);
-  await channel.send({
-    content: `Recent tasks:\n${lines.join("\n")}`,
-    reply: { messageReference: message },
-  });
-}
-
-async function sendTaskCompletionNotification(task: TaskRecord): Promise<void> {
-  if (!task.notifyOnCompletion || task.notifyChannel !== "same_channel" || !isTerminalTaskStatus(task.status)) return;
-
-  const client = globalDiscordClient;
-  if (!client) throw new Error("Discord client not ready");
-  const channel = await client.channels.fetch(task.discordChannelId);
-  if (!channel || !channel.isDMBased?.()) {
-    throw new Error(`Channel missing or not DM (${task.discordChannelId})`);
-  }
-
-  const dm = (await channel.fetch()) as DMChannel;
-  const parts: string[] = [];
-  if (task.summary) {
-    parts.push(task.summary);
-  } else if (task.status === "failed") {
-    parts.push("I hit an issue while working on that request.");
-  } else if (task.status === "cancelled") {
-    parts.push("I stopped that request before completion.");
-  } else {
-    parts.push("I finished working on that request.");
-  }
-  if (task.detailsUrl) parts.push(`Details: ${task.detailsUrl}`);
-
-  await dm.send({
-    content: parts.join("\n"),
-    reply: { messageReference: task.originMessageId },
-  });
-}
-
-function scheduleCompletionNotification(taskId: string): void {
-  const existing = completionRetryTimers.get(taskId);
-  if (existing) clearTimeout(existing);
-
-  const attemptSend = async () => {
-    const task = getTask(taskId);
-    if (!task || !task.notifyOnCompletion || !isTerminalTaskStatus(task.status)) {
-      completionRetryTimers.delete(taskId);
-      return;
-    }
-    if (task.notificationState === "sent") {
-      completionRetryTimers.delete(taskId);
-      return;
-    }
-
-    const attempts = (task.notificationAttempts ?? 0) + 1;
-    try {
-      await sendTaskCompletionNotification(task);
-      updateTask(taskId, {
-        notificationState: "sent",
-        notificationAttempts: attempts,
-        notificationLastError: undefined,
-      });
-      completionRetryTimers.delete(taskId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      updateTask(taskId, {
-        notificationState: "failed",
-        notificationAttempts: attempts,
-        notificationLastError: message,
-      });
-      if (attempts < NOTIFICATION_MAX_RETRIES) {
-        const delayMs = 1000 * 2 ** (attempts - 1);
-        const retryTimer = setTimeout(() => {
-          void attemptSend();
-        }, delayMs);
-        completionRetryTimers.set(taskId, retryTimer);
-      } else {
-        completionRetryTimers.delete(taskId);
-      }
-    }
-  };
-
-  void attemptSend();
-}
-
-async function runBackgroundTask(task: TaskRecord, promptText: string): Promise<void> {
-  const webhookSecret = getTaskWebhookSecret();
-  const webhookBaseUrl = getWebhookBaseUrl();
-  const publicInfo = getPublicTaskInfo(task, webhookBaseUrl);
-  const taskCtx = `[task:${task.id}]`;
-
-  const wrappedPrompt = [
-    "This request is running in background task mode.",
-    "IMPORTANT: Your FINAL message MUST contain a plain-text summary of what you did and what you found.",
-    "Do NOT end with only tool calls — always follow up with a text response summarizing the outcome.",
-    "Focus on completing the request end-to-end without waiting for further user input.",
-    "",
-    promptText,
-  ].join("\n");
-
-  const report = async (status: "running" | "completed" | "failed" | "cancelled", summary?: string): Promise<void> => {
-    if (webhookSecret) {
-      await sendTaskCompletionCallback({
-        baseUrl: webhookBaseUrl,
-        taskId: publicInfo.taskId,
-        status,
-        summary,
-        webhookSecret,
-        callbackToken: publicInfo.callbackToken,
-      });
-      return;
-    }
-
-    const patch: Partial<TaskRecord> = {
-      status,
-      summary,
-      completedAt: isTerminalTaskStatus(status) ? new Date().toISOString() : undefined,
-      notificationState: isTerminalTaskStatus(status) ? "pending" : undefined,
-    };
-    updateTask(task.id, patch);
-    if (isTerminalTaskStatus(status)) {
-      scheduleCompletionNotification(task.id);
-    }
-  };
-
-  try {
-    await report("running", "Background task started.");
-    const manager = SessionManager.create(ALFRED_CWD, `/alfred/state/task-sessions/${task.id}`);
-    const { model: bgModel, modelRegistry: bgRegistry } = resolveConfiguredModel();
-    const resourceLoader = await ensureResourceLoader();
-    const { session: taskSession } = await createAgentSession({
-      cwd: ALFRED_CWD,
-      sessionManager: manager,
-      resourceLoader,
-      ...(bgModel && { model: bgModel }),
-      ...(bgRegistry && { modelRegistry: bgRegistry }),
-    });
-
-    refreshPromptContext(taskSession);
-    const promptPromise = taskSession.prompt(wrappedPrompt);
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        taskSession.abort();
-        reject(new Error("Background task timed out"));
-      }, TASK_TIMEOUT_MS);
-    });
-
-    await Promise.race([promptPromise, timeoutPromise]);
-
-    const { text: assistantText, error: agentError } = extractLastTurnAssistantText(
-      taskSession.messages as { role?: string; content?: unknown; errorMessage?: string }[]
-    );
-    if (agentError) throw new Error(agentError);
-
-    taskSession.dispose();
-
-    const summary = (assistantText.trim() || `Finished working on: ${promptText.slice(0, 200)}`).slice(0, 600);
-    await report("completed", summary);
-    console.log("[Discord bridge]", taskCtx, "Background task completed");
-  } catch (err) {
-    const summary = formatErrorForUser(err);
-    await report("failed", summary);
-    console.error("[Discord bridge]", taskCtx, "Background task failed:", err);
-  }
 }
 
 async function handleForegroundTask(message: Message, channel: DMChannel, content: string): Promise<void> {
@@ -521,22 +285,15 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
     return;
   }
 
-  const task = createTask({ message, channel, notifyOnCompletion: false });
-  const taskCtx = `[task:${task.id} msg:${message.id}]`;
-  console.log("[Discord bridge]", taskCtx, "Created foreground task");
+  const taskCtx = `[msg:${message.id}]`;
+  console.log("[Discord bridge]", taskCtx, "Handling DM");
 
   processing = true;
-  updateTask(task.id, { status: "running" });
 
   try {
     const s = await getOrCreateSession();
     console.log("[Discord bridge]", taskCtx, "Session acquired, streaming:", s.isStreaming, "messages:", s.messages.length);
     if (s.isStreaming) {
-      updateTask(task.id, {
-        status: "failed",
-        summary: "Session was already streaming another response.",
-        completedAt: new Date().toISOString(),
-      });
       await channel.send({
         content: "Still working on another request. Try again in a moment.",
         reply: { messageReference: message },
@@ -564,7 +321,7 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
 
     try {
       refreshPromptContext(s);
-      await Promise.race([s.prompt(buildForegroundPrompt(content)), timeoutPromise]);
+      await Promise.race([s.prompt(content), timeoutPromise]);
     } finally {
       clearTimeout(timeoutId!);
       clearTimeout(reassuranceId!);
@@ -576,37 +333,12 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
     if (agentError) throw new Error(agentError);
 
     const textToSend = assistantText.trim();
-    if (textToSend === BACKGROUND_REQUIRED_TOKEN) {
-      const bgTask = createTask({ message, channel, notifyOnCompletion: true });
-      updateTask(task.id, {
-        status: "cancelled",
-        summary: "Escalated to background processing because additional context lookup was required.",
-        completedAt: new Date().toISOString(),
-      });
-      await channel.send({
-        content: "This needs a deeper lookup. I am on it and will update you when it is done.",
-        reply: { messageReference: message },
-      });
-      void runBackgroundTask(bgTask, content);
-      return;
-    }
-
     if (textToSend) {
       await sendToDiscord(channel, textToSend, message);
-      updateTask(task.id, {
-        status: "completed",
-        summary: textToSend.slice(0, 600),
-        completedAt: new Date().toISOString(),
-      });
     } else {
       await channel.send({
         content: "I processed that but didn't have anything to say.",
         reply: { messageReference: message },
-      });
-      updateTask(task.id, {
-        status: "completed",
-        summary: "Prompt completed with tool-only output (no text response).",
-        completedAt: new Date().toISOString(),
       });
     }
   } catch (err) {
@@ -614,11 +346,6 @@ async function handleForegroundTask(message: Message, channel: DMChannel, conten
     const msg = err instanceof Error ? err.message : String(err);
     const stack = err instanceof Error ? err.stack : undefined;
     console.error("[Discord bridge]", taskCtx, "Foreground task failed:", msg, stack);
-    updateTask(task.id, {
-      status: "failed",
-      summary: userMsg,
-      completedAt: new Date().toISOString(),
-    });
     await channel.send({
       content: `Sorry, something went wrong: ${userMsg}`,
       reply: { messageReference: message },
@@ -671,133 +398,7 @@ async function handleDM(message: Message): Promise<void> {
     return;
   }
 
-  const statusArg = parseStatusCommand(content);
-  if (content.toLowerCase().startsWith("!status")) {
-    await showTaskStatus(channel, message, statusArg);
-    return;
-  }
-
-  const taskPrompt = parseTaskCommand(content);
-  const forceBackground = taskPrompt !== null;
-  const backgroundPrompt = taskPrompt ?? content;
-  const shouldBackground = forceBackground;
-  if (shouldBackground) {
-    if (!backgroundPrompt.trim()) {
-      await channel.send({
-        content: "Usage: `!task <what to do>`",
-        reply: { messageReference: message },
-      });
-      return;
-    }
-    const task = createTask({ message, channel, notifyOnCompletion: true });
-    console.log("[Discord bridge]", `[task:${task.id} msg:${message.id}]`, "Created background task");
-    await channel.send({
-      content: "Working on it now. I will update you when it is done.",
-      reply: { messageReference: message },
-    });
-    void runBackgroundTask(task, backgroundPrompt);
-    return;
-  }
-
   await handleForegroundTask(message, channel, content);
-}
-
-let globalDiscordClient: Client | null = null;
-
-function startWebhookServer(): void {
-  const secret = getTaskWebhookSecret();
-  if (!secret) {
-    console.warn("[Discord bridge] TASK_WEBHOOK_SECRET not set, webhook mode disabled");
-    return;
-  }
-
-  const port = parseInt(process.env.TASK_WEBHOOK_PORT ?? "", 10) || DEFAULT_WEBHOOK_PORT;
-  const server = http.createServer((req, res) => {
-    if (req.method !== "POST" || !req.url?.startsWith("/webhooks/task-completed")) {
-      res.statusCode = 404;
-      res.end("Not found");
-      return;
-    }
-
-    let body = "";
-    req.setEncoding("utf8");
-    req.on("data", (chunk) => {
-      body += chunk;
-      if (body.length > 1024 * 1024) {
-        res.statusCode = 413;
-        res.end("Payload too large");
-        req.destroy();
-      }
-    });
-
-    req.on("end", () => {
-      try {
-        const providedSig = req.headers["x-task-signature"];
-        const hmac = computeHmacSignature(secret, body);
-        const sigString = Array.isArray(providedSig) ? providedSig[0] : providedSig ?? "";
-        if (!sigString || !crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(sigString))) {
-          res.statusCode = 401;
-          res.end("Invalid signature");
-          return;
-        }
-
-        const parsed = JSON.parse(body) as TaskCompletionPayload;
-        if (!parsed.task_id || !parsed.status) {
-          res.statusCode = 400;
-          res.end("task_id and status are required");
-          return;
-        }
-
-        const task = getTask(parsed.task_id);
-        if (!task) {
-          res.statusCode = 404;
-          res.end("Task not found");
-          return;
-        }
-
-        const callbackTokenHeader = req.headers["x-task-callback-token"];
-        const callbackToken = Array.isArray(callbackTokenHeader)
-          ? callbackTokenHeader[0] ?? null
-          : callbackTokenHeader ?? null;
-        if (!verifyTaskCallback(task, callbackToken)) {
-          res.statusCode = 401;
-          res.end("Invalid callback token");
-          return;
-        }
-
-        const terminal = isTerminalTaskStatus(parsed.status);
-        const alreadyTerminal = isTerminalTaskStatus(task.status);
-        const updated = updateTask(task.id, {
-          status: parsed.status,
-          summary: parsed.summary,
-          detailsUrl: parsed.details_url,
-          completedAt: terminal ? new Date().toISOString() : undefined,
-          notificationState: terminal ? task.notificationState ?? "pending" : task.notificationState,
-        });
-
-        if (!updated) {
-          res.statusCode = 500;
-          res.end("Failed to update task");
-          return;
-        }
-
-        if (terminal && (!alreadyTerminal || updated.notificationState !== "sent")) {
-          scheduleCompletionNotification(updated.id);
-        }
-
-        res.statusCode = 200;
-        res.end(alreadyTerminal ? "Already finalized" : "OK");
-      } catch (err) {
-        console.error("[Discord bridge] Error handling task completion webhook:", err);
-        res.statusCode = 500;
-        res.end("Internal error");
-      }
-    });
-  });
-
-  server.listen(port, () => {
-    console.log(`[Discord bridge] Task completion webhook listening on port ${port}`);
-  });
 }
 
 process.on("unhandledRejection", (reason) => {
@@ -817,19 +418,15 @@ async function main(): Promise<void> {
 
   const alfredModel = process.env.ALFRED_MODEL ?? "";
   console.log(`[Discord bridge] ALFRED_MODEL env: "${alfredModel || '(not set)'}"`);
-  console.log(`[Discord bridge] ALFRED_PI_SESSION_DIR: ${PI_SESSION_DIR}`);
+  console.log(
+    `[Discord bridge] Pi session dir: ${getInteractiveSessionDir()}${process.env.ALFRED_PI_SESSION_DIR?.trim() ? " (ALFRED_PI_SESSION_DIR override)" : " (Pi default under agentDir)"}`
+  );
 
-  if (fs.existsSync(LEGACY_DISCORD_SESSION_DIR)) {
-    console.warn(
-      "[Discord bridge] Legacy Discord-only session dir still exists (ignored):",
-      LEGACY_DISCORD_SESSION_DIR,
-      "- safe to delete on the volume after upgrading."
-    );
-  }
-
-  const recoveredCount = recoverNonTerminalTasks();
-  if (recoveredCount > 0) {
-    console.warn(`[Discord bridge] Recovered ${recoveredCount} non-terminal tasks after restart.`);
+  const legacyDirs = ["/alfred/.pi/sessions/discord", "/alfred/state/pi-session"];
+  for (const d of legacyDirs) {
+    if (fs.existsSync(d)) {
+      console.warn(`[Discord bridge] Legacy path still on volume (safe to delete): ${d}`);
+    }
   }
 
   const client = new Client({
@@ -838,9 +435,7 @@ async function main(): Promise<void> {
   });
 
   client.on(Events.ClientReady, (c) => {
-    globalDiscordClient = client;
     console.log(`[Discord bridge] Logged in as ${c.user.tag}`);
-    startWebhookServer();
   });
 
   client.on(Events.MessageCreate, (message) => {

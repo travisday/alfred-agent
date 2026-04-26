@@ -12,7 +12,7 @@ import { dirname } from "node:path";
 
 const DISCORD_API = "https://discord.com/api/v10";
 const CHUNK_SIZE = 1900;
-const EVENT_FILE = process.env.ALFRED_EVENT_FILE?.trim() || "/alfred/state/events.jsonl";
+const EVENT_FILE = process.env.ALFRED_EVENT_FILE?.trim() || "/root/.pi/agent/events.jsonl";
 
 let cachedRecipientId: string | null = null;
 let cachedDmChannelId: string | null = null;
@@ -121,7 +121,7 @@ export default function (pi: ExtensionAPI) {
     name: "send_discord_message",
     label: "Send Discord DM",
     description:
-      "REQUIRED for proactive check-ins: send the full summary as a DM to the user via the Alfred Discord bot. The user does not read check-ins from the terminal—Discord is the inbox. Call this with the complete message (bullets OK).",
+      "Send a DM to the user via the Alfred Discord bot with the complete message (bullets OK). Use when the user should see something in Discord rather than only in the terminal session.",
     promptSnippet: "send_discord_message: Send a DM to the owner via Discord",
     parameters: Type.Object({
       message: Type.String({
